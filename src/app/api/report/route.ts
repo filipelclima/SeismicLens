@@ -14,31 +14,34 @@ export async function POST(req: Request) {
     const avgGas = avg(snapshots.map((s: any) => s.gas_price))
     const avgLatency = avg(snapshots.map((s: any) => s.rpc_latency))
     const totalTx = snapshots.reduce((a: number, s: any) => a + s.tx_count, 0)
+    const totalShieldedTx = snapshots.reduce((a: number, s: any) => a + (s.shielded_tx_count ?? 0), 0)
     const avgScore = avg(snapshots.map((s: any) => s.health_score ?? 75))
     const anomalies = snapshots.filter((s: any) => s.anomaly).length
     const uptime = ((snapshots.length - anomalies) / snapshots.length * 100).toFixed(1)
 
-    const prompt = `You are ArcPulse, an AI analyst monitoring the Arc blockchain testnet. Generate a professional weekly network health report based on the following data.
+    const prompt = `You are SeismicPulse, an AI analyst monitoring the Seismic testnet — an EVM L1 with native on-chain privacy (TEE-secured nodes, shielded storage, encrypted type-0x4A transactions). Generate a professional weekly network health report based on the following data.
 
 Period: ${period}
 Total snapshots collected: ${snapshots.length}
-Average block time: ${avgBlockTime.toFixed(3)}s (Arc promises sub-1s finality)
-Average gas price: ${avgGas.toFixed(4)} gwei (paid in USDC)
+Average block time: ${avgBlockTime.toFixed(3)}s (Seismic's Summit consensus targets sub-second finality)
+Average gas price: ${avgGas.toFixed(4)} gwei (paid in ETH)
 Average RPC latency: ${Math.round(avgLatency)}ms
 Total transactions recorded: ${totalTx}
+Shielded (type 0x4A, encrypted-calldata) transactions: ${totalShieldedTx}
 Average health score: ${Math.round(avgScore)}/100
 Anomalies detected: ${anomalies}
 Network uptime: ${uptime}%
 
 Write a structured weekly report with these sections:
 1. Executive Summary (2-3 sentences)
-2. Network Performance (block time analysis, finality promise compliance)
+2. Network Performance (block time analysis, sub-second finality target compliance)
 3. Gas & Fees (stability, predictability for builders)
-4. Network Health (score analysis, anomalies if any)
-5. Builder Insights (what this means for developers building on Arc)
-6. Outlook (brief forward-looking statement)
+4. Privacy Adoption (what the shielded-transaction share suggests about SRC20/confidential contract usage)
+5. Network Health (score analysis, anomalies if any)
+6. Builder Insights (what this means for developers building on Seismic)
+7. Outlook (brief forward-looking statement)
 
-Keep it factual, professional, and useful for the Arc community. Format it ready to post on a forum. Use markdown formatting.`
+Keep it factual, professional, and useful for the Seismic community. Format it ready to post on a forum. Use markdown formatting.`
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -48,7 +51,7 @@ Keep it factual, professional, and useful for the Arc community. Format it ready
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-opus-4-6',
+        model: 'claude-sonnet-5',
         max_tokens: 1024,
         messages: [{ role: 'user', content: prompt }],
       }),

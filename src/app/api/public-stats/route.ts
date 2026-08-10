@@ -1,12 +1,12 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextRequest, NextResponse } from 'next/server'
+import { RPC_HTTP } from '@/lib/chain'
 
 export const dynamic = 'force-dynamic'
 
-// ─── ArcPulse Public API ──────────────────────────────────────────────────────
-// Open, unauthenticated, read-only access to the data ArcPulse collects from
-// the Arc Testnet RPC. No API key required — built to help the Arc builder
-// community consume and build on top of ArcPulse's historical snapshot data.
+// ─── SeismicPulse Public API ──────────────────────────────────────────────
+// Open, unauthenticated, read-only access to the data SeismicPulse collects
+// from the Seismic testnet RPC. No API key required.
 //
 // Endpoints (query param: ?endpoint=<name>):
 //
@@ -36,15 +36,16 @@ function corsHeaders() {
   }
 }
 
-function summarise(rs: { block_time_avg: number; gas_price: number; rpc_latency: number; health_score: number; tx_count: number; anomaly: boolean }[]) {
+function summarise(rs: { block_time_avg: number; gas_price: number; rpc_latency: number; health_score: number; tx_count: number; shielded_tx_count: number; anomaly: boolean }[]) {
   if (!rs.length) return null
   return {
     snapshots: rs.length,
     avg_block_time_s: parseFloat(avg(rs.map(r => r.block_time_avg)).toFixed(3)),
     avg_gas_price_gwei: parseFloat(avg(rs.map(r => r.gas_price)).toFixed(4)),
     avg_rpc_latency_ms: Math.round(avg(rs.map(r => r.rpc_latency))),
-    avg_health_score: Math.round(avg(rs.map(r => r.health_score))),
     total_tx_count: rs.reduce((s, r) => s + (r.tx_count ?? 0), 0),
+    total_shielded_tx_count: rs.reduce((s, r) => s + (r.shielded_tx_count ?? 0), 0),
+    avg_health_score: Math.round(avg(rs.map(r => r.health_score))),
     anomaly_count: rs.filter(r => r.anomaly).length,
   }
 }
@@ -61,7 +62,7 @@ export async function GET(req: NextRequest) {
     if (endpoint === 'latest') {
       const { data, error } = await supabase
         .from('network_snapshots')
-        .select('id, created_at, block_number, block_time_avg, gas_price, rpc_latency, tx_count, chain_id, health_score, anomaly, anomaly_severity')
+        .select('id, created_at, block_number, block_time_avg, gas_price, rpc_latency, tx_count, shielded_tx_count, chain_id, health_score, anomaly, anomaly_severity')
         .order('created_at', { ascending: false })
         .limit(1)
         .single()
@@ -73,9 +74,9 @@ export async function GET(req: NextRequest) {
         endpoint: 'latest',
         data,
         meta: {
-          description: 'Most recent ArcPulse snapshot from Arc Testnet',
-          source: 'https://arcpulse-self.vercel.app',
-          rpc: 'https://rpc.testnet.arc.network',
+          description: 'Most recent SeismicPulse snapshot from Seismic Testnet',
+          source: 'https://seismicpulse.vercel.app',
+          rpc: RPC_HTTP,
         },
       }, { headers: corsHeaders() })
     }
@@ -89,7 +90,7 @@ export async function GET(req: NextRequest) {
 
       const { data, error } = await supabase
         .from('network_snapshots')
-        .select('id, created_at, block_number, block_time_avg, gas_price, rpc_latency, tx_count, chain_id, health_score, anomaly, anomaly_severity')
+        .select('id, created_at, block_number, block_time_avg, gas_price, rpc_latency, tx_count, shielded_tx_count, chain_id, health_score, anomaly, anomaly_severity')
         .gte('created_at', since)
         .order('created_at', { ascending: false })
         .limit(limit)
@@ -103,9 +104,9 @@ export async function GET(req: NextRequest) {
         params: { limit, days },
         data,
         meta: {
-          description: `Last ${days} days of ArcPulse snapshots (max ${limit} rows, newest first)`,
-          source: 'https://arcpulse-self.vercel.app',
-          rpc: 'https://rpc.testnet.arc.network',
+          description: `Last ${days} days of SeismicPulse snapshots (max ${limit} rows, newest first)`,
+          source: 'https://seismicpulse.vercel.app',
+          rpc: RPC_HTTP,
         },
       }, { headers: corsHeaders() })
     }
@@ -114,7 +115,7 @@ export async function GET(req: NextRequest) {
     const since30d = new Date(Date.now() - 30 * 86_400_000).toISOString()
     const { data: rows, error } = await supabase
       .from('network_snapshots')
-      .select('created_at, block_time_avg, gas_price, rpc_latency, tx_count, health_score, anomaly')
+      .select('created_at, block_time_avg, gas_price, rpc_latency, tx_count, shielded_tx_count, health_score, anomaly')
       .gte('created_at', since30d)
       .order('created_at', { ascending: false })
 
@@ -130,10 +131,10 @@ export async function GET(req: NextRequest) {
       last_7d: summarise(rows7d),
       last_30d: summarise(rows30d),
       meta: {
-        description: 'Aggregated Arc Testnet health metrics collected by ArcPulse',
-        source: 'https://arcpulse-self.vercel.app',
-        rpc: 'https://rpc.testnet.arc.network',
-        chain_id: 5042002,
+        description: 'Aggregated Seismic Testnet health metrics collected by SeismicPulse',
+        source: 'https://seismicpulse.vercel.app',
+        rpc: RPC_HTTP,
+        chain_id: 5124,
         endpoints: {
           summary: '/api/public-stats',
           latest: '/api/public-stats?endpoint=latest',

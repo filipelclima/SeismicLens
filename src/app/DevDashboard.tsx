@@ -1,11 +1,9 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
-
-const RPC = 'https://rpc.testnet.arc.network'
-const ARC_CHAIN_ID = '0x4CE252' // 5042002 in hex
+import { RPC_HTTP, EXPLORER_URL, SHIELDED_TX_TYPE, seismicTimestampToSeconds } from '@/lib/chain'
 
 async function rpcCall(method: string, params: unknown[] = []) {
-  const res = await fetch(RPC, {
+  const res = await fetch(RPC_HTTP, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
@@ -17,7 +15,8 @@ async function rpcCall(method: string, params: unknown[] = []) {
 const hexToNum = (h: string) => parseInt(h, 16)
 
 function timeAgo(ts: number) {
-  const d = Math.floor(Date.now() / 1000) - ts
+  // ts is fractional seconds (Seismic's timestamp has millisecond precision).
+  const d = Math.floor(Date.now() / 1000 - ts)
   if (d < 60) return `${d}s ago`
   if (d < 3600) return `${Math.floor(d / 60)}m ago`
   if (d < 86400) return `${Math.floor(d / 3600)}h ago`
@@ -31,13 +30,15 @@ interface DevTx {
   gasUsed: number
   gasCost: number
   type: string
+  shielded: boolean
   to: string
 }
 
 interface DevStats {
   txCount: number
-  totalGasUSDC: number
+  totalGasETH: number
   contractsDeployed: number
+  shieldedTxCount: number
   balance: string
   txs: DevTx[]
 }
@@ -65,7 +66,6 @@ export function ConnectButton() {
   const [error, setError] = useState('')
 
   useEffect(() => {
-    // Check if already connected
     const eth = (window as any).ethereum
     if (!eth) return
     eth.request({ method: 'eth_accounts' }).then((accounts: string[]) => {
@@ -74,7 +74,6 @@ export function ConnectButton() {
         setWalletType(detectWallet())
       }
     })
-    // Listen for account changes
     eth.on('accountsChanged', (accounts: string[]) => {
       setAddress(accounts.length > 0 ? accounts[0] : null)
     })
@@ -112,7 +111,7 @@ export function ConnectButton() {
   if (address) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <div style={{ background: '#0d2b1f', border: '1px solid #1D9E75', borderRadius: 8, padding: '6px 12px', fontSize: 12, color: '#1D9E75', display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ background: '#1e0d2b', border: '1px solid #8B5CF6', borderRadius: 8, padding: '6px 12px', fontSize: 12, color: '#A78BFA', display: 'flex', alignItems: 'center', gap: 6 }}>
           <WalletIcon type={walletType} />
           <span style={{ fontFamily: 'monospace' }}>{address.slice(0, 6)}...{address.slice(-4)}</span>
         </div>
@@ -126,7 +125,7 @@ export function ConnectButton() {
 
   return (
     <button onClick={connect} disabled={connecting}
-      style={{ background: '#1D9E75', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: 500, cursor: connecting ? 'not-allowed' : 'pointer', opacity: connecting ? 0.7 : 1, display: 'flex', alignItems: 'center', gap: 6 }}>
+      style={{ background: '#8B5CF6', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: 500, cursor: connecting ? 'not-allowed' : 'pointer', opacity: connecting ? 0.7 : 1, display: 'flex', alignItems: 'center', gap: 6 }}>
       {connecting ? '⏳ Connecting...' : '🔗 Connect Wallet'}
     </button>
   )
@@ -165,7 +164,7 @@ export function DevDashboardTab() {
     setLoading(true)
     try {
       const balHex = await rpcCall('eth_getBalance', [addr, 'latest'])
-      const balance = (hexToNum(balHex) / 1e6).toFixed(4)
+      const balance = (hexToNum(balHex) / 1e18).toFixed(6)
 
       const latestHex = await rpcCall('eth_blockNumber')
       const latest = hexToNum(latestHex)
@@ -185,6 +184,7 @@ export function DevDashboardTab() {
       const txs: DevTx[] = []
       let contractsDeployed = 0
       let totalGas = 0
+      let shieldedTxCount = 0
 
       for (const block of blocks) {
         if (!block?.transactions) continue
@@ -195,14 +195,17 @@ export function DevDashboardTab() {
           const gasCost = (gasUsed * gasPrice) / 1e9
           totalGas += gasCost
           const isContract = !tx.to
+          const shielded = tx.type?.toLowerCase() === SHIELDED_TX_TYPE
           if (isContract) contractsDeployed++
+          if (shielded) shieldedTxCount++
           txs.push({
             hash: tx.hash,
             block: hexToNum(block.number),
-            timestamp: hexToNum(block.timestamp),
+            timestamp: seismicTimestampToSeconds(block.timestamp),
             gasUsed,
             gasCost,
-            type: isContract ? '📄 Contract Deploy' : '💸 Transfer',
+            type: isContract ? '📄 Contract Deploy' : shielded ? '🔒 Shielded Tx' : '💸 Transfer',
+            shielded,
             to: tx.to ?? 'Contract Creation',
           })
         }
@@ -210,8 +213,9 @@ export function DevDashboardTab() {
 
       setStats({
         txCount: txs.length,
-        totalGasUSDC: totalGas,
+        totalGasETH: totalGas,
         contractsDeployed,
+        shieldedTxCount,
         balance,
         txs: txs.sort((a, b) => b.timestamp - a.timestamp).slice(0, 15),
       })
@@ -231,7 +235,7 @@ export function DevDashboardTab() {
         <div style={{ fontSize: 48, marginBottom: 16 }}>🦊</div>
         <div style={{ fontSize: 18, fontWeight: 600, color: '#f1f5f9', marginBottom: 8 }}>No wallet detected</div>
         <div style={{ fontSize: 13, color: '#64748b', marginBottom: 24 }}>
-          Install <a href="https://metamask.io" target="_blank" rel="noopener noreferrer" style={{ color: '#1D9E75' }}>MetaMask</a> or <a href="https://rabby.io" target="_blank" rel="noopener noreferrer" style={{ color: '#1D9E75' }}>Rabby Wallet</a> to use this feature.
+          Install <a href="https://metamask.io" target="_blank" rel="noopener noreferrer" style={{ color: '#A78BFA' }}>MetaMask</a> or <a href="https://rabby.io" target="_blank" rel="noopener noreferrer" style={{ color: '#A78BFA' }}>Rabby Wallet</a> to use this feature.
         </div>
       </div>
     )
@@ -243,7 +247,7 @@ export function DevDashboardTab() {
         <div style={{ fontSize: 48, marginBottom: 16 }}>🔗</div>
         <div style={{ fontSize: 18, fontWeight: 600, color: '#f1f5f9', marginBottom: 8 }}>Connect your wallet</div>
         <div style={{ fontSize: 13, color: '#64748b', marginBottom: 24, maxWidth: 400, margin: '0 auto 24px' }}>
-          Connect your wallet to see your personal developer dashboard — transactions, contracts deployed, gas spent and more on Arc testnet.
+          Connect your wallet to see your personal developer dashboard — transactions, contracts deployed, gas spent and more on Seismic testnet.
         </div>
         <ConnectButton />
       </div>
@@ -265,30 +269,35 @@ export function DevDashboardTab() {
 
       {loading ? (
         <div style={{ fontSize: 13, color: '#475569', textAlign: 'center', padding: '3rem' }}>
-          Scanning Arc testnet for your activity...
+          Scanning Seismic testnet for your activity...
         </div>
       ) : stats ? (
         <>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, marginBottom: '1.5rem' }}>
             <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1rem 1.25rem' }}>
-              <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>USDC Balance</div>
-              <div style={{ fontSize: 24, fontWeight: 600, color: '#1D9E75' }}>{stats.balance}</div>
-              <div style={{ fontSize: 12, color: '#475569', marginTop: 3 }}>USDC</div>
+              <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>ETH Balance</div>
+              <div style={{ fontSize: 24, fontWeight: 600, color: '#8B5CF6' }}>{stats.balance}</div>
+              <div style={{ fontSize: 12, color: '#475569', marginTop: 3 }}>ETH</div>
             </div>
             <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1rem 1.25rem' }}>
               <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Transactions</div>
-              <div style={{ fontSize: 24, fontWeight: 600, color: '#378ADD' }}>{stats.txCount}</div>
+              <div style={{ fontSize: 24, fontWeight: 600, color: '#38BDF8' }}>{stats.txCount}</div>
               <div style={{ fontSize: 12, color: '#475569', marginTop: 3 }}>last 500 blocks</div>
+            </div>
+            <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1rem 1.25rem' }}>
+              <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Shielded Txs</div>
+              <div style={{ fontSize: 24, fontWeight: 600, color: '#F59E0B' }}>{stats.shieldedTxCount}</div>
+              <div style={{ fontSize: 12, color: '#475569', marginTop: 3 }}>type 0x4A</div>
             </div>
             <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1rem 1.25rem' }}>
               <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Contracts Deployed</div>
               <div style={{ fontSize: 24, fontWeight: 600, color: '#A78BFA' }}>{stats.contractsDeployed}</div>
-              <div style={{ fontSize: 12, color: '#475569', marginTop: 3 }}>on Arc testnet</div>
+              <div style={{ fontSize: 12, color: '#475569', marginTop: 3 }}>on Seismic testnet</div>
             </div>
             <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1rem 1.25rem' }}>
               <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Gas Spent</div>
-              <div style={{ fontSize: 24, fontWeight: 600, color: '#EF9F27' }}>{stats.totalGasUSDC.toFixed(6)}</div>
-              <div style={{ fontSize: 12, color: '#475569', marginTop: 3 }}>USDC total</div>
+              <div style={{ fontSize: 24, fontWeight: 600, color: '#EF9F27' }}>{stats.totalGasETH.toFixed(8)}</div>
+              <div style={{ fontSize: 12, color: '#475569', marginTop: 3 }}>ETH total</div>
             </div>
           </div>
 
@@ -305,22 +314,22 @@ export function DevDashboardTab() {
                     <th style={{ textAlign: 'left', paddingBottom: 8, fontWeight: 500 }}>Hash</th>
                     <th style={{ textAlign: 'left', paddingBottom: 8, fontWeight: 500 }}>Type</th>
                     <th style={{ textAlign: 'left', paddingBottom: 8, fontWeight: 500 }}>Age</th>
-                    <th style={{ textAlign: 'right', paddingBottom: 8, fontWeight: 500 }}>Gas (USDC)</th>
+                    <th style={{ textAlign: 'right', paddingBottom: 8, fontWeight: 500 }}>Gas (ETH)</th>
                   </tr>
                 </thead>
                 <tbody>
                   {stats.txs.map(tx => (
                     <tr key={tx.hash} style={{ borderTop: '1px solid #1e1e2e' }}>
-                      <td style={{ padding: '8px 0', color: '#378ADD', fontFamily: 'monospace' }}>
-                        <a href={`https://testnet.arcscan.app/tx/${tx.hash}`} target="_blank" rel="noopener noreferrer"
-                          style={{ color: '#378ADD', textDecoration: 'none' }}>
+                      <td style={{ padding: '8px 0', color: '#38BDF8', fontFamily: 'monospace' }}>
+                        <a href={`${EXPLORER_URL}/tx/${tx.hash}`} target="_blank" rel="noopener noreferrer"
+                          style={{ color: '#38BDF8', textDecoration: 'none' }}>
                           {tx.hash.slice(0, 8)}...{tx.hash.slice(-6)}
                         </a>
                       </td>
-                      <td style={{ padding: '8px 0', color: '#94a3b8' }}>{tx.type}</td>
+                      <td style={{ padding: '8px 0', color: tx.shielded ? '#F59E0B' : '#94a3b8' }}>{tx.type}</td>
                       <td style={{ padding: '8px 0', color: '#64748b' }}>{timeAgo(tx.timestamp)}</td>
                       <td style={{ padding: '8px 0', textAlign: 'right', color: '#EF9F27', fontFamily: 'monospace' }}>
-                        {tx.gasCost.toFixed(8)}
+                        {tx.gasCost.toFixed(10)}
                       </td>
                     </tr>
                   ))}

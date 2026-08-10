@@ -1,19 +1,18 @@
 'use client'
-import { useArcData } from './useArcData'
+import { useSeismicData } from './useSeismicData'
 import { useState, useEffect } from 'react'
 import { ConnectButton, DevDashboardTab } from './DevDashboard'
+import { RPC_HTTP, RPC_WSS, EXPLORER_URL, CHAIN_ID, SHIELDED_TX_TYPE, seismicTimestampToSeconds } from '@/lib/chain'
 import {
   LineChart, Line, BarChart, Bar,
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from 'recharts'
-import { decodeFunctionData, parseAbi } from 'viem'
 
-const RPC = 'https://rpc.testnet.arc.network'
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!
 const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 
 async function rpcCall(method: string, params: unknown[] = []) {
-  const res = await fetch(RPC, {
+  const res = await fetch(RPC_HTTP, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
@@ -25,13 +24,16 @@ async function rpcCall(method: string, params: unknown[] = []) {
 const hexToNum = (h: string) => parseInt(h, 16)
 
 function timeAgo(ts: number) {
-  const d = Math.floor(Date.now() / 1000) - ts
+  // ts is fractional seconds (Seismic's timestamp has millisecond precision) —
+  // floor the delta itself, not just Date.now()/1000, or sub-second block ages
+  // render with a long decimal tail.
+  const d = Math.floor(Date.now() / 1000 - ts)
   if (d < 60) return `${d}s ago`
   if (d < 3600) return `${Math.floor(d / 60)}m ago`
   return `${Math.floor(d / 3600)}h ago`
 }
 
-function MetricCard({ label, value, unit, color = '#1D9E75' }: {
+function MetricCard({ label, value, unit, color = '#8B5CF6' }: {
   label: string; value: string | number; unit: string; color?: string
 }) {
   return (
@@ -57,6 +59,7 @@ interface Snapshot {
   gas_price: number
   rpc_latency: number
   tx_count: number
+  shielded_tx_count: number
   chain_id: number
 }
 
@@ -89,8 +92,8 @@ function avg(arr: number[]) {
 }
 
 function networkStatus(blockTime: number, latency: number) {
-  if (blockTime < 1 && latency < 300) return { label: 'Healthy', color: '#1D9E75' }
-  if (blockTime < 2 && latency < 600) return { label: 'Normal', color: '#EF9F27' }
+  if (blockTime < 1 && latency < 300) return { label: 'Healthy', color: '#8B5CF6' }
+  if (blockTime < 2 && latency < 600) return { label: 'Normal', color: '#F59E0B' }
   return { label: 'Degraded', color: '#ef4444' }
 }
 
@@ -149,12 +152,11 @@ function ExportButtons({ data, filenameBase }: { data: Record<string, any>[]; fi
 
 // ─── DASHBOARD TAB ────────────────────────────────────────────────
 function DashboardTab() {
-  const { data, refresh } = useArcData()
+  const { data, refresh } = useSeismicData()
   const [gasHistory, setGasHistory] = useState<{day: string; gas: number}[]>([])
-  const [builderActivity, setBuilderActivity] = useState<{day: string; contracts: number; txs: number}[]>([])
+  const [shieldedHistory, setShieldedHistory] = useState<{day: string; shielded: number; total: number}[]>([])
 
   useEffect(() => {
-    // Gas history from Supabase
     fetchSnapshots().then(snaps => {
       const byDay = groupByDay(snaps)
       const gh = Object.entries(byDay).sort().map(([day, s]) => ({
@@ -163,13 +165,12 @@ function DashboardTab() {
       }))
       setGasHistory(gh)
 
-      // Builder activity: contracts = snapshots with high tx count as proxy, txs = total
-      const ba = Object.entries(byDay).sort().map(([day, s]) => ({
+      const sh = Object.entries(byDay).sort().map(([day, s]) => ({
         day: day.slice(5),
-        contracts: s.filter(x => x.tx_count > 50).length,
-        txs: Math.round(avg(s.map(x => x.tx_count))),
+        shielded: s.reduce((a, x) => a + (x.shielded_tx_count ?? 0), 0),
+        total: s.reduce((a, x) => a + x.tx_count, 0),
       }))
-      setBuilderActivity(ba)
+      setShieldedHistory(sh)
     })
   }, [])
 
@@ -183,7 +184,7 @@ function DashboardTab() {
     txs: b.txCount,
   }))
 
-  const statusColor = data.status === 'live' ? '#1D9E75' : data.status === 'error' ? '#ef4444' : '#f59e0b'
+  const statusColor = data.status === 'live' ? '#8B5CF6' : data.status === 'error' ? '#ef4444' : '#f59e0b'
   const statusLabel = data.status === 'live' ? 'Live' : data.status === 'error' ? 'Error' : 'Connecting...'
 
   return (
@@ -200,11 +201,11 @@ function DashboardTab() {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, marginBottom: '1.5rem' }}>
         <MetricCard label="Latest block" value={data.latestBlock > 0 ? data.latestBlock.toLocaleString() : '—'} unit="block number" />
-        <MetricCard label="Avg block time" value={data.avgBlockTime > 0 ? `${data.avgBlockTime}s` : '—'} unit="last 10 blocks" color="#378ADD" />
-        <MetricCard label="Base fee" value={data.gasPrice !== '0' ? `${data.gasPrice}` : '—'} unit="gwei · USDC gas" color="#EF9F27" />
+        <MetricCard label="Avg block time" value={data.avgBlockTime > 0 ? `${data.avgBlockTime}s` : '—'} unit="last 10 blocks" color="#38BDF8" />
+        <MetricCard label="Gas price" value={data.gasPrice !== '0' ? `${data.gasPrice}` : '—'} unit="gwei · paid in ETH" color="#F59E0B" />
         <MetricCard label="RPC latency" value={data.rpcLatency > 0 ? `${data.rpcLatency}ms` : '—'} unit="response time" color="#A78BFA" />
-        <MetricCard label="Tx (last block)" value={data.blocks.length > 0 ? data.blocks[data.blocks.length - 1].txCount : '—'} unit="transactions" color="#1D9E75" />
-        <MetricCard label="Chain ID" value={data.chainId > 0 ? data.chainId : '—'} unit="Arc Testnet" color="#64748b" />
+        <MetricCard label="Tx (last block)" value={data.blocks.length > 0 ? data.blocks[data.blocks.length - 1].txCount : '—'} unit="transactions" color="#8B5CF6" />
+        <MetricCard label="Chain ID" value={data.chainId > 0 ? data.chainId : '—'} unit="Seismic Testnet" color="#64748b" />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: '1.5rem' }}>
@@ -216,7 +217,7 @@ function DashboardTab() {
               <XAxis dataKey="block" tick={{ fontSize: 10, fill: '#475569' }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
               <YAxis tick={{ fontSize: 10, fill: '#475569' }} tickLine={false} axisLine={false} width={28} />
               <Tooltip {...chartTooltipStyle} />
-              <Line type="monotone" dataKey="time" stroke="#1D9E75" strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="time" stroke="#8B5CF6" strokeWidth={2} dot={false} />
             </LineChart>
           </ResponsiveContainer>
         </div>
@@ -228,13 +229,13 @@ function DashboardTab() {
               <XAxis dataKey="block" tick={{ fontSize: 10, fill: '#475569' }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
               <YAxis tick={{ fontSize: 10, fill: '#475569' }} tickLine={false} axisLine={false} width={28} />
               <Tooltip {...chartTooltipStyle} />
-              <Bar dataKey="txs" fill="#378ADD" radius={[3, 3, 0, 0]} />
+              <Bar dataKey="txs" fill="#38BDF8" radius={[3, 3, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
       </div>
 
-      {/* Gas History + Builder Activity */}
+      {/* Gas History + Shielded Activity History */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: '1.5rem' }}>
         <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1rem 1.25rem' }}>
           <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Gas price history</div>
@@ -248,25 +249,25 @@ function DashboardTab() {
                 <XAxis dataKey="day" tick={{ fontSize: 10, fill: '#475569' }} tickLine={false} axisLine={false} />
                 <YAxis tick={{ fontSize: 10, fill: '#475569' }} tickLine={false} axisLine={false} width={40} />
                 <Tooltip {...chartTooltipStyle} />
-                <Line type="monotone" dataKey="gas" stroke="#EF9F27" strokeWidth={2} dot={{ r: 3, fill: '#EF9F27' }} />
+                <Line type="monotone" dataKey="gas" stroke="#F59E0B" strokeWidth={2} dot={{ r: 3, fill: '#F59E0B' }} />
               </LineChart>
             </ResponsiveContainer>
           )}
         </div>
 
         <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1rem 1.25rem' }}>
-          <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Builder activity index</div>
-          <div style={{ fontSize: 11, color: '#334155', marginBottom: 10 }}>Avg transactions per snapshot per day</div>
-          {builderActivity.length < 2 ? (
+          <div style={{ fontSize: 12, color: '#64748b', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Shielded tx history</div>
+          <div style={{ fontSize: 11, color: '#334155', marginBottom: 10 }}>Type 0x4A (encrypted calldata) txs per day</div>
+          {shieldedHistory.length < 2 ? (
             <div style={{ fontSize: 12, color: '#475569', textAlign: 'center', padding: '2rem 0' }}>Collecting data... more snapshots needed</div>
           ) : (
             <ResponsiveContainer width="100%" height={150}>
-              <BarChart data={builderActivity}>
+              <BarChart data={shieldedHistory}>
                 <CartesianGrid stroke="#1e1e2e" strokeDasharray="3 3" />
                 <XAxis dataKey="day" tick={{ fontSize: 10, fill: '#475569' }} tickLine={false} axisLine={false} />
                 <YAxis tick={{ fontSize: 10, fill: '#475569' }} tickLine={false} axisLine={false} width={28} />
                 <Tooltip {...chartTooltipStyle} />
-                <Bar dataKey="txs" fill="#A78BFA" radius={[3, 3, 0, 0]} />
+                <Bar dataKey="shielded" fill="#A78BFA" radius={[3, 3, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           )}
@@ -289,10 +290,10 @@ function DashboardTab() {
             <tbody>
               {[...data.blocks].reverse().map(b => (
                 <tr key={b.number} style={{ borderTop: '1px solid #1e1e2e' }}>
-                  <td style={{ padding: '9px 0', color: '#1D9E75', fontWeight: 500 }}>#{b.number.toLocaleString()}</td>
+                  <td style={{ padding: '9px 0', color: '#8B5CF6', fontWeight: 500 }}>#{b.number.toLocaleString()}</td>
                   <td style={{ padding: '9px 0', color: '#64748b' }}>{timeAgo(b.timestamp)}</td>
                   <td style={{ padding: '9px 0', textAlign: 'right' }}>
-                    <span style={{ background: '#0c1a2e', color: '#378ADD', fontSize: 11, padding: '2px 8px', borderRadius: 6 }}>{b.txCount} txs</span>
+                    <span style={{ background: '#0c1a2e', color: '#38BDF8', fontSize: 11, padding: '2px 8px', borderRadius: 6 }}>{b.txCount} txs</span>
                   </td>
                 </tr>
               ))}
@@ -349,11 +350,10 @@ function ReportsTab() {
   const byDay = groupByDay(snapshots)
   const days = Object.keys(byDay).sort().reverse()
 
-  // Uptime calculation
   const totalSnaps = snapshots.length
   const healthySnaps = snapshots.filter(s => !(s as any).anomaly).length
   const uptimePct = totalSnaps > 0 ? ((healthySnaps / totalSnaps) * 100).toFixed(1) : '—'
-  const uptimeColor = parseFloat(uptimePct) >= 99 ? '#1D9E75' : parseFloat(uptimePct) >= 95 ? '#EF9F27' : '#ef4444'
+  const uptimeColor = parseFloat(uptimePct) >= 99 ? '#8B5CF6' : parseFloat(uptimePct) >= 95 ? '#F59E0B' : '#ef4444'
   const avgScore = totalSnaps > 0 ? Math.round(snapshots.reduce((a, s) => a + ((s as any).health_score ?? 75), 0) / totalSnaps) : 0
 
   return (
@@ -367,7 +367,7 @@ function ReportsTab() {
         </div>
         <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1rem 1.25rem' }}>
           <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Healthy Snapshots</div>
-          <div style={{ fontSize: 28, fontWeight: 700, color: '#1D9E75' }}>{healthySnaps}</div>
+          <div style={{ fontSize: 28, fontWeight: 700, color: '#8B5CF6' }}>{healthySnaps}</div>
           <div style={{ fontSize: 12, color: '#475569', marginTop: 3 }}>of {totalSnaps} total</div>
         </div>
         <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1rem 1.25rem' }}>
@@ -377,7 +377,7 @@ function ReportsTab() {
         </div>
         <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1rem 1.25rem' }}>
           <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Days Monitored</div>
-          <div style={{ fontSize: 28, fontWeight: 700, color: '#378ADD' }}>{days.length}</div>
+          <div style={{ fontSize: 28, fontWeight: 700, color: '#38BDF8' }}>{days.length}</div>
           <div style={{ fontSize: 12, color: '#475569', marginTop: 3 }}>since first snapshot</div>
         </div>
       </div>
@@ -415,13 +415,13 @@ function ReportsTab() {
                     name === 'uptime' ? 'Uptime' : 'Health Score'
                   ]}
                 />
-                <Line type="monotone" dataKey="uptime" stroke="#1D9E75" strokeWidth={2} dot={{ r: 4, fill: '#1D9E75' }} />
+                <Line type="monotone" dataKey="uptime" stroke="#8B5CF6" strokeWidth={2} dot={{ r: 4, fill: '#8B5CF6' }} />
                 <Line type="monotone" dataKey="score" stroke="#A78BFA" strokeWidth={2} dot={{ r: 4, fill: '#A78BFA' }} strokeDasharray="4 2" />
               </LineChart>
             </ResponsiveContainer>
             <div style={{ display: 'flex', gap: 16, marginTop: 10, fontSize: 11, color: '#64748b' }}>
               <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                <span style={{ width: 12, height: 2, background: '#1D9E75', display: 'inline-block', borderRadius: 2 }} />
+                <span style={{ width: 12, height: 2, background: '#8B5CF6', display: 'inline-block', borderRadius: 2 }} />
                 Uptime %
               </span>
               <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -441,7 +441,7 @@ function ReportsTab() {
         <span style={{ color: '#475569', fontSize: 13 }}>to</span>
         <input type="date" value={to} onChange={e => setTo(e.target.value)}
           style={{ background: '#0a0a0f', border: '1px solid #1e1e2e', borderRadius: 8, padding: '7px 12px', color: '#f1f5f9', fontSize: 13 }} />
-        <button onClick={search} style={{ background: '#1D9E75', color: '#fff', border: 'none', borderRadius: 8, padding: '7px 18px', fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>
+        <button onClick={search} style={{ background: '#8B5CF6', color: '#fff', border: 'none', borderRadius: 8, padding: '7px 18px', fontSize: 13, fontWeight: 500, cursor: 'pointer' }}>
           Search
         </button>
         <button onClick={() => { setFrom(''); setTo(''); setAiReport(null); fetchSnapshots().then(setSnapshots) }}
@@ -449,7 +449,7 @@ function ReportsTab() {
           Clear
         </button>
         <div style={{ marginLeft: 'auto' }}>
-          <ExportButtons data={snapshots} filenameBase={`arcpulse-snapshots${from ? `-${from}` : ''}${to ? `_to_${to}` : ''}`} />
+          <ExportButtons data={snapshots} filenameBase={`seismicpulse-snapshots${from ? `-${from}` : ''}${to ? `_to_${to}` : ''}`} />
         </div>
       </div>
 
@@ -466,7 +466,7 @@ function ReportsTab() {
               const status = networkStatus(avg(snaps.map(s => s.block_time_avg)), avg(snaps.map(s => s.rpc_latency)))
               return (
                 <div key={day} onClick={() => { setSelected(day); setAiReport(null) }}
-                  style={{ background: selected === day ? '#1a2a1a' : '#13131a', border: `1px solid ${selected === day ? '#1D9E75' : '#1e1e2e'}`, borderRadius: 10, padding: '0.875rem 1rem', cursor: 'pointer' }}>
+                  style={{ background: selected === day ? '#1a1030' : '#13131a', border: `1px solid ${selected === day ? '#8B5CF6' : '#1e1e2e'}`, borderRadius: 10, padding: '0.875rem 1rem', cursor: 'pointer' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div style={{ fontSize: 14, fontWeight: 500, color: '#f1f5f9' }}>{day}</div>
                     <span style={{ fontSize: 11, color: status.color, background: `${status.color}22`, padding: '2px 8px', borderRadius: 6 }}>{status.label}</span>
@@ -500,11 +500,11 @@ function ReportsTab() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
                     <div>
                       <div style={{ fontSize: 18, fontWeight: 600, color: '#f1f5f9' }}>Report · {selected}</div>
-                      <div style={{ fontSize: 12, color: '#475569', marginTop: 2 }}>Arc Testnet · {snaps.length} snapshots</div>
+                      <div style={{ fontSize: 12, color: '#475569', marginTop: 2 }}>Seismic Testnet · {snaps.length} snapshots</div>
                     </div>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                       <span style={{ fontSize: 13, color: status.color, background: `${status.color}22`, padding: '4px 12px', borderRadius: 8 }}>{status.label}</span>
-                      <ExportButtons data={snaps} filenameBase={`arcpulse-report-${selected}`} />
+                      <ExportButtons data={snaps} filenameBase={`seismicpulse-report-${selected}`} />
                       <button onClick={generateAIReport} disabled={aiLoading}
                         style={{ background: aiLoading ? '#1a1a2e' : '#4f46e5', color: '#fff', border: 'none', borderRadius: 8, padding: '6px 14px', fontSize: 12, fontWeight: 500, cursor: aiLoading ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
                         {aiLoading ? '⏳ Generating...' : '✨ AI Report'}
@@ -513,10 +513,10 @@ function ReportsTab() {
                   </div>
 
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: '1.25rem' }}>
-                    <MetricCard label="Avg block time" value={`${avgBlockTime.toFixed(3)}s`} unit="seconds" color="#1D9E75" />
-                    <MetricCard label="Avg gas" value={`${avgGas.toFixed(4)}`} unit="gwei" color="#EF9F27" />
+                    <MetricCard label="Avg block time" value={`${avgBlockTime.toFixed(3)}s`} unit="seconds" color="#8B5CF6" />
+                    <MetricCard label="Avg gas" value={`${avgGas.toFixed(4)}`} unit="gwei" color="#F59E0B" />
                     <MetricCard label="Avg latency" value={`${Math.round(avgLatency)}ms`} unit="RPC response" color="#A78BFA" />
-                    <MetricCard label="Total txs" value={totalTx} unit="transactions" color="#378ADD" />
+                    <MetricCard label="Total txs" value={totalTx} unit="transactions" color="#38BDF8" />
                   </div>
 
                   {chartData.length > 1 && (
@@ -528,7 +528,7 @@ function ReportsTab() {
                           <XAxis dataKey="time" tick={{ fontSize: 10, fill: '#475569' }} tickLine={false} axisLine={false} />
                           <YAxis tick={{ fontSize: 10, fill: '#475569' }} tickLine={false} axisLine={false} width={28} />
                           <Tooltip {...chartTooltipStyle} />
-                          <Line type="monotone" dataKey="blockTime" stroke="#1D9E75" strokeWidth={2} dot={false} />
+                          <Line type="monotone" dataKey="blockTime" stroke="#8B5CF6" strokeWidth={2} dot={false} />
                         </LineChart>
                       </ResponsiveContainer>
                     </>
@@ -551,8 +551,8 @@ function ReportsTab() {
                   {!aiReport && (
                     <div style={{ marginTop: '1rem', background: '#0a0a0f', borderRadius: 8, padding: '1rem', fontSize: 13, color: '#94a3b8', lineHeight: 1.7 }}>
                       <strong style={{ color: '#f1f5f9' }}>Summary</strong><br />
-                      On {selected}, the Arc testnet recorded an average block time of <strong style={{ color: '#1D9E75' }}>{avgBlockTime.toFixed(3)}s</strong> {avgBlockTime < 1 ? '— within the sub-second finality promise.' : '— slightly above the sub-second target.'}{' '}
-                      Gas remained at <strong style={{ color: '#EF9F27' }}>{avgGas.toFixed(4)} gwei</strong> in USDC.{' '}
+                      On {selected}, the Seismic testnet recorded an average block time of <strong style={{ color: '#8B5CF6' }}>{avgBlockTime.toFixed(3)}s</strong> {avgBlockTime < 1 ? '— within the sub-second target.' : '— slightly above the sub-second target.'}{' '}
+                      Gas remained at <strong style={{ color: '#F59E0B' }}>{avgGas.toFixed(4)} gwei</strong> paid in ETH.{' '}
                       RPC latency averaged <strong style={{ color: '#A78BFA' }}>{Math.round(avgLatency)}ms</strong>.{' '}
                       Network status: <strong style={{ color: status.color }}>{status.label}</strong>.{' '}
                       Click <strong style={{ color: '#818cf8' }}>✨ AI Report</strong> to generate a full analysis.
@@ -602,12 +602,14 @@ function TxTypeBreakdown() {
         let contractCalls = 0
         let contractDeploys = 0
         let tokenTransfers = 0
+        let shielded = 0
         let totalTx = 0
 
         for (const block of blocks) {
           if (!block?.transactions) continue
           for (const tx of block.transactions) {
             totalTx++
+            if (tx.type?.toLowerCase() === SHIELDED_TX_TYPE) { shielded++; continue }
             const input = tx.input ?? tx.data ?? '0x'
             const isContractDeploy = !tx.to
             const isTokenTransfer = input.startsWith('0xa9059cbb') || input.startsWith('0x23b872dd')
@@ -625,10 +627,11 @@ function TxTypeBreakdown() {
         setTotal(totalTx)
         setBlocksScanned(scanCount)
         setTypes([
-          { label: 'ETH/Token Transfer', count: transfers, color: '#1D9E75', icon: '💸', description: 'Simple value transfers between wallets' },
-          { label: 'Token Transfer (ERC-20)', count: tokenTransfers, color: '#378ADD', icon: '🪙', description: 'ERC-20 token transfers via transfer()' },
+          { label: 'Shielded (0x4A)', count: shielded, color: '#8B5CF6', icon: '🔒', description: 'Encrypted calldata — decrypted only inside the TEE' },
+          { label: 'ETH Transfer', count: transfers, color: '#38BDF8', icon: '💸', description: 'Simple value transfers between wallets' },
+          { label: 'Token Transfer (ERC-20)', count: tokenTransfers, color: '#F59E0B', icon: '🪙', description: 'ERC-20 token transfers via transfer()' },
           { label: 'Contract Call', count: contractCalls, color: '#A78BFA', icon: '⚙️', description: 'Interactions with deployed contracts' },
-          { label: 'Contract Deploy', count: contractDeploys, color: '#EF9F27', icon: '📄', description: 'New smart contracts deployed' },
+          { label: 'Contract Deploy', count: contractDeploys, color: '#64748b', icon: '📄', description: 'New smart contracts deployed' },
         ])
       } catch (e) {
         console.error(e)
@@ -651,7 +654,6 @@ function TxTypeBreakdown() {
         <div style={{ fontSize: 13, color: '#475569' }}>Analyzing transaction types...</div>
       ) : (
         <>
-          {/* Bar chart visual */}
           <div style={{ marginBottom: '1rem' }}>
             <div style={{ display: 'flex', height: 24, borderRadius: 8, overflow: 'hidden', gap: 2 }}>
               {types.filter(t => t.count > 0).map((t, i) => (
@@ -665,7 +667,6 @@ function TxTypeBreakdown() {
             </div>
           </div>
 
-          {/* Type list */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {types.map((t, i) => (
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -701,11 +702,6 @@ function TxTypeBreakdown() {
 }
 
 // ─── NETWORK STATUS TAB ──────────────────────────────────────────
-const RPC_ENDPOINTS = [
-  { name: 'Primary RPC', url: 'https://rpc.testnet.arc.network' },
-  { name: 'HTTP Alt', url: 'https://rpc.testnet.arc.network' },
-]
-
 interface EndpointStatus {
   name: string
   url: string
@@ -723,53 +719,71 @@ interface TxStats {
   blocksScanned: number
 }
 
-interface FaucetStatus {
-  online: boolean
-  statusCode: number | null
-  blocked: boolean
-  latency: number
-  checkedAt: string
-  error?: string
+interface TransportStatus {
+  http: { online: boolean; latency: number | null }
+  ws: { online: boolean; latency: number | null }
+  checkedAt: Date
 }
 
-function FaucetStatusCard() {
-  const [status, setStatus] = useState<FaucetStatus | null>(null)
+// Seismic exposes RPC over both HTTPS (JSON-RPC) and WSS (subscriptions).
+// There's no public faucet-status endpoint documented for Seismic testnet, so
+// this monitors the thing builders actually depend on: are both transports up.
+function TransportStatusCard() {
+  const [status, setStatus] = useState<TransportStatus | null>(null)
   const [loading, setLoading] = useState(true)
 
   async function check() {
     setLoading(true)
+    const httpT0 = Date.now()
+    let httpOnline = false
+    let httpLatency: number | null = null
     try {
-      const res = await fetch('/api/faucet-status')
-      const data: FaucetStatus = await res.json()
-      setStatus(data)
-    } catch {
-      setStatus(null)
-    }
+      const res = await fetch(RPC_HTTP, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] }),
+      })
+      const data = await res.json()
+      httpOnline = !!data.result
+      httpLatency = Date.now() - httpT0
+    } catch { httpOnline = false }
+
+    const wsResult = await new Promise<{ online: boolean; latency: number | null }>(resolve => {
+      const t0 = Date.now()
+      let settled = false
+      try {
+        const ws = new WebSocket(RPC_WSS)
+        const timeout = setTimeout(() => {
+          if (!settled) { settled = true; ws.close(); resolve({ online: false, latency: null }) }
+        }, 8000)
+        ws.onopen = () => {
+          if (!settled) {
+            settled = true
+            clearTimeout(timeout)
+            resolve({ online: true, latency: Date.now() - t0 })
+            ws.close()
+          }
+        }
+        ws.onerror = () => {
+          if (!settled) { settled = true; clearTimeout(timeout); resolve({ online: false, latency: null }) }
+        }
+      } catch {
+        resolve({ online: false, latency: null })
+      }
+    })
+
+    setStatus({ http: { online: httpOnline, latency: httpLatency }, ws: wsResult, checkedAt: new Date() })
     setLoading(false)
   }
 
   useEffect(() => { check() }, [])
 
-  const latencyColor = (ms: number) =>
-    ms <= 800 ? '#1D9E75' : ms <= 2000 ? '#EF9F27' : '#ef4444'
-
-  // Three states, not two: a real network failure (genuinely offline) is a
-  // different signal than "server responded but with a non-2xx" (often bot
-  // protection blocking automated requests — see route.ts caveat) — both are
-  // shown distinctly instead of collapsing into a misleading red/green.
-  const dotColor = !status ? '#475569' : !status.online ? '#ef4444' : status.blocked ? '#EF9F27' : '#1D9E75'
-  const label = !status
-    ? 'Unknown'
-    : !status.online
-      ? 'Offline / Unreachable'
-      : status.blocked
-        ? `Reachable (HTTP ${status.statusCode})`
-        : 'Online'
+  const latencyColor = (ms: number) => ms <= 300 ? '#8B5CF6' : ms <= 800 ? '#F59E0B' : '#ef4444'
 
   return (
     <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1.25rem', marginBottom: '1.25rem' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-        <div style={{ fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>💧 Circle Faucet Status</div>
+        <div style={{ fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>🔌 RPC Transport Status</div>
         <button onClick={check} disabled={loading}
           style={{ fontSize: 11, padding: '4px 10px', borderRadius: 6, border: '1px solid #1e1e2e', background: 'transparent', color: '#64748b', cursor: 'pointer' }}>
           ↻
@@ -777,42 +791,41 @@ function FaucetStatusCard() {
       </div>
 
       {loading ? (
-        <div style={{ fontSize: 13, color: '#475569' }}>Checking faucet.circle.com...</div>
+        <div style={{ fontSize: 13, color: '#475569' }}>Checking HTTPS + WSS transports...</div>
       ) : status ? (
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 8, height: 8, borderRadius: '50%', background: dotColor }} />
-            <div>
-              <div style={{ fontSize: 14, fontWeight: 500, color: dotColor }}>{label}</div>
-              <a href="https://faucet.circle.com/" target="_blank" rel="noopener noreferrer"
-                style={{ fontSize: 11, color: '#475569', fontFamily: 'monospace', textDecoration: 'none' }}>
-                faucet.circle.com ↗
-              </a>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          {([
+            { label: 'HTTPS (JSON-RPC)', url: RPC_HTTP, s: status.http },
+            { label: 'WSS (subscriptions)', url: RPC_WSS, s: status.ws },
+          ] as const).map(row => (
+            <div key={row.label} style={{ background: '#0a0a0f', borderRadius: 10, padding: '0.875rem 1rem', border: `1px solid ${row.s.online ? '#1e1e2e' : '#3f1a1a'}` }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <div style={{ width: 8, height: 8, borderRadius: '50%', background: row.s.online ? '#8B5CF6' : '#ef4444' }} />
+                <span style={{ fontSize: 13, fontWeight: 500, color: '#f1f5f9' }}>{row.label}</span>
+              </div>
+              <div style={{ fontSize: 11, color: '#475569', fontFamily: 'monospace', marginBottom: 6 }}>{row.url}</div>
+              {row.s.online ? (
+                <div style={{ fontSize: 16, fontWeight: 600, color: latencyColor(row.s.latency ?? 0) }}>{row.s.latency}ms</div>
+              ) : (
+                <div style={{ fontSize: 12, color: '#ef4444' }}>Unreachable</div>
+              )}
             </div>
-          </div>
-          <div style={{ textAlign: 'right' }}>
-            {status.online ? (
-              <div style={{ fontSize: 18, fontWeight: 600, color: latencyColor(status.latency) }}>{status.latency}ms</div>
-            ) : (
-              <div style={{ fontSize: 12, color: '#ef4444' }}>{status.error === 'timeout' ? 'Timed out' : 'No response'}</div>
-            )}
-            <div style={{ fontSize: 11, color: '#475569' }}>
-              {new Date(status.checkedAt).toLocaleTimeString()}
-            </div>
-          </div>
+          ))}
         </div>
       ) : (
-        <div style={{ fontSize: 13, color: '#ef4444' }}>Couldn't check faucet status. Try refreshing.</div>
+        <div style={{ fontSize: 13, color: '#ef4444' }}>Couldn't check transport status. Try refreshing.</div>
       )}
 
       <div style={{ fontSize: 11, color: '#334155', marginTop: 10, lineHeight: 1.5 }}>
-        Checks reachability of Circle's public USDC/EURC faucet page (20 USDC per address every 2h on Arc Testnet).
-        {status?.blocked && ' "Reachable" with a non-200 response usually means the server is up but blocking automated requests (bot protection) — it does not mean the faucet is down.'}
-        {' '}This reflects whether the page is responding, not whether your specific claim will succeed.
+        Seismic's testnet RPC is dual-transport: HTTPS for request/response JSON-RPC, WSS for subscriptions (new blocks, pending txs). This checks both are reachable, not any specific method's correctness.
       </div>
     </div>
   )
 }
+
+const RPC_ENDPOINTS = [
+  { name: 'Primary RPC', url: RPC_HTTP },
+]
 
 function NetworkStatusTab() {
   const [endpoints, setEndpoints] = useState<EndpointStatus[]>(
@@ -854,28 +867,16 @@ function NetworkStatusTab() {
       )
 
       let total = 0
-      let success = 0
-      let failed = 0
       let totalGas = 0
-
       for (const block of blocks) {
         if (!block?.transactions) continue
         for (const tx of block.transactions) {
           total++
-          const gasUsed = hexToNum(tx.gas ?? '0x0')
-          totalGas += gasUsed
-          // Transactions with gas > 21000 are contract calls, assume success
-          // Failed txs typically use all gas
-          const isLikelyFailed = gasUsed === hexToNum(tx.gas ?? '0x0') && gasUsed > 21000
-          if (isLikelyFailed && Math.random() < 0.05) {
-            failed++
-          } else {
-            success++
-          }
+          totalGas += hexToNum(tx.gas ?? '0x0')
         }
       }
 
-      // Get actual receipts for a sample to get real success rate
+      // Real success rate from a sample of actual receipts.
       const sampleTxs = blocks
         .filter(b => b?.transactions?.length > 0)
         .flatMap(b => b.transactions)
@@ -883,7 +884,6 @@ function NetworkStatusTab() {
 
       let realSuccess = 0
       let realFailed = 0
-
       await Promise.all(
         sampleTxs.map(async (tx: any) => {
           try {
@@ -928,21 +928,17 @@ function NetworkStatusTab() {
   }, [])
 
   const successRateColor = (rate: number) =>
-    rate >= 99 ? '#1D9E75' : rate >= 95 ? '#EF9F27' : '#ef4444'
+    rate >= 99 ? '#8B5CF6' : rate >= 95 ? '#F59E0B' : '#ef4444'
 
   const latencyColor = (ms: number) =>
-    ms <= 200 ? '#1D9E75' : ms <= 500 ? '#EF9F27' : '#ef4444'
-
-  const fastestEndpoint = endpoints
-    .filter(e => e.status === 'online' && e.latency !== null)
-    .sort((a, b) => (a.latency ?? 9999) - (b.latency ?? 9999))[0]
+    ms <= 200 ? '#8B5CF6' : ms <= 500 ? '#F59E0B' : '#ef4444'
 
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
         <div>
           <div style={{ fontSize: 16, fontWeight: 600, color: '#f1f5f9' }}>Network Status</div>
-          <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>Real-time RPC health, faucet status, and transaction success rates</div>
+          <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>Real-time RPC health, transport status, and transaction success rates</div>
         </div>
         <button onClick={() => { runTests(); fetchTxStats() }}
           style={{ fontSize: 12, padding: '6px 14px', borderRadius: 8, border: '1px solid #1e1e2e', background: 'transparent', color: '#94a3b8', cursor: 'pointer' }}>
@@ -950,8 +946,7 @@ function NetworkStatusTab() {
         </button>
       </div>
 
-      {/* Faucet Status */}
-      <FaucetStatusCard />
+      <TransportStatusCard />
 
       {/* Transaction Success Rate */}
       <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1.25rem', marginBottom: '1.25rem' }}>
@@ -968,12 +963,11 @@ function NetworkStatusTab() {
                 <div style={{ fontSize: 28, fontWeight: 700, color: successRateColor(txStats.successRate) }}>{txStats.successRate}%</div>
                 <div style={{ fontSize: 12, color: '#475569', marginTop: 3 }}>of sampled txs</div>
               </div>
-              <MetricCard label="Total Txs Scanned" value={txStats.total.toLocaleString()} unit="transactions" color="#378ADD" />
-              <MetricCard label="Successful" value={txStats.success.toLocaleString()} unit="transactions" color="#1D9E75" />
+              <MetricCard label="Total Txs Scanned" value={txStats.total.toLocaleString()} unit="transactions" color="#38BDF8" />
+              <MetricCard label="Successful" value={txStats.success.toLocaleString()} unit="transactions" color="#8B5CF6" />
               <MetricCard label="Failed" value={txStats.failed.toLocaleString()} unit="transactions" color={txStats.failed > 0 ? '#ef4444' : '#64748b'} />
             </div>
 
-            {/* Success rate bar */}
             <div style={{ marginTop: 8 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#64748b', marginBottom: 6 }}>
                 <span>Success</span>
@@ -989,18 +983,12 @@ function NetworkStatusTab() {
         )}
       </div>
 
-      {/* Transaction Type Breakdown */}
       <TxTypeBreakdown />
 
       {/* RPC Endpoint Status */}
       <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1.25rem' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
           <div style={{ fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>RPC Endpoint Monitor</div>
-          {fastestEndpoint && (
-            <span style={{ fontSize: 11, color: '#1D9E75', background: '#0d2b1f', padding: '3px 10px', borderRadius: 6 }}>
-              ⚡ Fastest: {fastestEndpoint.name} ({fastestEndpoint.latency}ms)
-            </span>
-          )}
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -1010,7 +998,7 @@ function NetworkStatusTab() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <div style={{
                     width: 8, height: 8, borderRadius: '50%',
-                    background: ep.status === 'online' ? '#1D9E75' : ep.status === 'offline' ? '#ef4444' : '#EF9F27',
+                    background: ep.status === 'online' ? '#8B5CF6' : ep.status === 'offline' ? '#ef4444' : '#F59E0B',
                     animation: ep.status === 'testing' ? 'pulse 1s infinite' : 'none'
                   }} />
                   <div>
@@ -1020,7 +1008,7 @@ function NetworkStatusTab() {
                 </div>
                 <div style={{ textAlign: 'right' }}>
                   {ep.status === 'testing' ? (
-                    <div style={{ fontSize: 12, color: '#EF9F27' }}>Testing...</div>
+                    <div style={{ fontSize: 12, color: '#F59E0B' }}>Testing...</div>
                   ) : ep.status === 'offline' ? (
                     <div style={{ fontSize: 12, color: '#ef4444', fontWeight: 600 }}>OFFLINE</div>
                   ) : (
@@ -1058,7 +1046,6 @@ function NetworkStatusTab() {
         )}
       </div>
 
-      {/* Gas Estimator */}
       <GasEstimator />
     </div>
   )
@@ -1069,12 +1056,12 @@ const GAS_OPERATIONS = [
   { label: 'Simple ETH Transfer', gas: 21000, description: 'Basic transfer between wallets' },
   { label: 'ERC-20 Token Transfer', gas: 65000, description: 'Transfer an ERC-20 token' },
   { label: 'ERC-20 Token Approval', gas: 46000, description: 'Approve a token spender' },
+  { label: 'SRC20 Shielded Transfer', gas: 90000, description: 'Transfer with suint256 balances (CLOAD/CSTORE)' },
   { label: 'Uniswap / DEX Swap', gas: 150000, description: 'Swap tokens on a DEX' },
   { label: 'NFT Mint', gas: 120000, description: 'Mint a single NFT' },
   { label: 'Smart Contract Deploy (Simple)', gas: 300000, description: 'Deploy a basic contract' },
   { label: 'Smart Contract Deploy (Complex)', gas: 1500000, description: 'Deploy a complex contract with logic' },
   { label: 'Contract Function Call', gas: 80000, description: 'Call a smart contract function' },
-  { label: 'Multisig Transaction', gas: 200000, description: 'Execute a multisig operation' },
 ]
 
 function GasEstimator() {
@@ -1090,29 +1077,28 @@ function GasEstimator() {
 
   const op = GAS_OPERATIONS[selectedOp]
   const gasLimit = customGas ? parseInt(customGas) : op.gas
-  const gasPriceGwei = gasPrice ?? 20
+  const gasPriceGwei = gasPrice ?? 1
   const costGwei = gasLimit * gasPriceGwei
-  const costUSDC = (costGwei / 1e9).toFixed(8)
-  const costUSDCDisplay = parseFloat(costUSDC) < 0.000001
-    ? '< $0.000001'
-    : `$${parseFloat(costUSDC).toFixed(6)}`
+  const costETH = (costGwei / 1e9).toFixed(10)
+  const costETHDisplay = parseFloat(costETH) < 0.0000001
+    ? '< 0.0000001 ETH'
+    : `${parseFloat(costETH).toFixed(8)} ETH`
 
   return (
     <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1.25rem', marginTop: '1.25rem' }}>
       <div style={{ fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '1rem' }}>
-        ⛽ Gas Estimator — Cost in USDC
+        ⛽ Gas Estimator — Cost in ETH
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: '1rem' }}>
-        {/* Operation selector */}
         <div>
           <div style={{ fontSize: 12, color: '#64748b', marginBottom: 8 }}>Select operation</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {GAS_OPERATIONS.map((op, i) => (
               <div key={i} onClick={() => { setSelectedOp(i); setCustomGas('') }}
                 style={{
-                  background: selectedOp === i ? '#1a2a1a' : '#0a0a0f',
-                  border: `1px solid ${selectedOp === i ? '#1D9E75' : '#1e1e2e'}`,
+                  background: selectedOp === i ? '#1a1030' : '#0a0a0f',
+                  border: `1px solid ${selectedOp === i ? '#8B5CF6' : '#1e1e2e'}`,
                   borderRadius: 8, padding: '8px 12px', cursor: 'pointer',
                   display: 'flex', justifyContent: 'space-between', alignItems: 'center'
                 }}>
@@ -1128,12 +1114,11 @@ function GasEstimator() {
           </div>
         </div>
 
-        {/* Result */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <div style={{ background: '#0a0a0f', borderRadius: 10, padding: '1.25rem', border: '1px solid #1D9E7544' }}>
+          <div style={{ background: '#0a0a0f', borderRadius: 10, padding: '1.25rem', border: '1px solid #8B5CF644' }}>
             <div style={{ fontSize: 12, color: '#64748b', marginBottom: 6 }}>Estimated cost</div>
-            <div style={{ fontSize: 32, fontWeight: 700, color: '#1D9E75' }}>{costUSDCDisplay}</div>
-            <div style={{ fontSize: 12, color: '#475569', marginTop: 4 }}>paid in USDC</div>
+            <div style={{ fontSize: 32, fontWeight: 700, color: '#8B5CF6' }}>{costETHDisplay}</div>
+            <div style={{ fontSize: 12, color: '#475569', marginTop: 4 }}>at current gas price</div>
           </div>
 
           <div style={{ background: '#0a0a0f', borderRadius: 10, padding: '1rem', border: '1px solid #1e1e2e' }}>
@@ -1145,15 +1130,15 @@ function GasEstimator() {
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ color: '#475569' }}>Gas price</span>
-                <span style={{ color: '#EF9F27', fontFamily: 'monospace' }}>{gasPriceGwei.toFixed(4)} gwei</span>
+                <span style={{ color: '#F59E0B', fontFamily: 'monospace' }}>{gasPriceGwei.toFixed(4)} gwei</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ color: '#475569' }}>Total gas cost</span>
                 <span style={{ color: '#f1f5f9', fontFamily: 'monospace' }}>{costGwei.toLocaleString()} gwei</span>
               </div>
               <div style={{ borderTop: '1px solid #1e1e2e', paddingTop: 6, display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: '#475569' }}>Cost in USDC</span>
-                <span style={{ color: '#1D9E75', fontWeight: 600, fontFamily: 'monospace' }}>{costUSDCDisplay}</span>
+                <span style={{ color: '#475569' }}>Cost in ETH</span>
+                <span style={{ color: '#8B5CF6', fontWeight: 600, fontFamily: 'monospace' }}>{costETHDisplay}</span>
               </div>
             </div>
           </div>
@@ -1176,10 +1161,10 @@ function GasEstimator() {
             </div>
           </div>
 
-          <div style={{ background: '#0c1a0c', borderRadius: 10, padding: '1rem', border: '1px solid #1D9E7522' }}>
-            <div style={{ fontSize: 12, color: '#1D9E75', fontWeight: 500, marginBottom: 4 }}>💡 Arc Advantage</div>
+          <div style={{ background: '#0c0c1a', borderRadius: 10, padding: '1rem', border: '1px solid #8B5CF622' }}>
+            <div style={{ fontSize: 12, color: '#8B5CF6', fontWeight: 500, marginBottom: 4 }}>💡 Fee mechanics</div>
             <div style={{ fontSize: 12, color: '#475569', lineHeight: 1.6 }}>
-              Gas is paid in USDC — no exposure to token volatility. The price you see is the price you pay, regardless of market conditions.
+              Gas is priced in ETH like any standard EVM chain — Seismic doesn't change fee mechanics. Privacy comes from TEE execution and shielded storage, not from the fee market.
             </div>
           </div>
         </div>
@@ -1187,6 +1172,8 @@ function GasEstimator() {
     </div>
   )
 }
+
+// ─── COMPARE TAB ──────────────────────────────────────────────────
 function CompareTab() {
   const [periodA, setPeriodA] = useState({ from: '', to: '' })
   const [periodB, setPeriodB] = useState({ from: '', to: '' })
@@ -1214,7 +1201,7 @@ function CompareTab() {
     const diff = b - a
     const pct = a !== 0 ? ((diff / a) * 100).toFixed(1) : '0'
     const improved = higherIsBetter ? diff > 0 : diff < 0
-    const color = diff === 0 ? '#64748b' : improved ? '#1D9E75' : '#ef4444'
+    const color = diff === 0 ? '#64748b' : improved ? '#8B5CF6' : '#ef4444'
     const arrow = diff === 0 ? '→' : diff > 0 ? '↑' : '↓'
 
     return (
@@ -1252,7 +1239,6 @@ function CompareTab() {
     <div>
       <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1.25rem', marginBottom: '1.25rem' }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-          {/* Period A */}
           <div>
             <div style={{ fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>Period A</div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -1263,7 +1249,6 @@ function CompareTab() {
                 style={{ background: '#0a0a0f', border: '1px solid #1e1e2e', borderRadius: 8, padding: '7px 12px', color: '#f1f5f9', fontSize: 13 }} />
             </div>
           </div>
-          {/* Period B */}
           <div>
             <div style={{ fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>Period B</div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -1276,7 +1261,7 @@ function CompareTab() {
           </div>
         </div>
         <button onClick={compare} disabled={loading || !periodA.from || !periodB.from}
-          style={{ marginTop: 16, background: '#1D9E75', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 24px', fontSize: 13, fontWeight: 500, cursor: 'pointer', opacity: loading ? 0.7 : 1 }}>
+          style={{ marginTop: 16, background: '#8B5CF6', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 24px', fontSize: 13, fontWeight: 500, cursor: 'pointer', opacity: loading ? 0.7 : 1 }}>
           {loading ? 'Comparing...' : 'Compare'}
         </button>
       </div>
@@ -1291,11 +1276,11 @@ function CompareTab() {
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
               <div style={{ fontSize: 13, color: '#64748b', display: 'flex', alignItems: 'center', gap: 10 }}>
                 Period A: <strong style={{ color: '#f1f5f9' }}>{periodA.from}{periodA.to && periodA.to !== periodA.from ? ` → ${periodA.to}` : ''}</strong> ({dataA.length} snapshots)
-                <ExportButtons data={dataA} filenameBase={`arcpulse-compare-A-${periodA.from}`} />
+                <ExportButtons data={dataA} filenameBase={`seismicpulse-compare-A-${periodA.from}`} />
               </div>
               <div style={{ fontSize: 13, color: '#64748b', display: 'flex', alignItems: 'center', gap: 10 }}>
                 Period B: <strong style={{ color: '#f1f5f9' }}>{periodB.from}{periodB.to && periodB.to !== periodB.from ? ` → ${periodB.to}` : ''}</strong> ({dataB.length} snapshots)
-                <ExportButtons data={dataB} filenameBase={`arcpulse-compare-B-${periodB.from}`} />
+                <ExportButtons data={dataB} filenameBase={`seismicpulse-compare-B-${periodB.from}`} />
               </div>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: '1.25rem' }}>
@@ -1309,10 +1294,10 @@ function CompareTab() {
               <div style={{ fontSize: 13, fontWeight: 500, color: '#f1f5f9', marginBottom: 8 }}>Comparison Summary</div>
               <div style={{ fontSize: 13, color: '#94a3b8', lineHeight: 1.8 }}>
                 Comparing <strong style={{ color: '#f1f5f9' }}>Period A</strong> vs <strong style={{ color: '#f1f5f9' }}>Period B</strong>:{' '}
-                Block time {bBlockTime < aBlockTime ? <span style={{ color: '#1D9E75' }}>improved by {(((aBlockTime - bBlockTime) / aBlockTime) * 100).toFixed(1)}%</span> : <span style={{ color: '#ef4444' }}>increased by {(((bBlockTime - aBlockTime) / aBlockTime) * 100).toFixed(1)}%</span>}.{' '}
-                Gas price {bGas < aGas ? <span style={{ color: '#1D9E75' }}>decreased</span> : bGas > aGas ? <span style={{ color: '#ef4444' }}>increased</span> : <span style={{ color: '#64748b' }}>remained stable</span>}.{' '}
-                RPC latency {bLatency < aLatency ? <span style={{ color: '#1D9E75' }}>improved</span> : <span style={{ color: '#ef4444' }}>degraded</span>}.{' '}
-                Transaction volume {bTx > aTx ? <span style={{ color: '#1D9E75' }}>grew</span> : <span style={{ color: '#ef4444' }}>declined</span>}.
+                Block time {bBlockTime < aBlockTime ? <span style={{ color: '#8B5CF6' }}>improved by {(((aBlockTime - bBlockTime) / aBlockTime) * 100).toFixed(1)}%</span> : <span style={{ color: '#ef4444' }}>increased by {(((bBlockTime - aBlockTime) / aBlockTime) * 100).toFixed(1)}%</span>}.{' '}
+                Gas price {bGas < aGas ? <span style={{ color: '#8B5CF6' }}>decreased</span> : bGas > aGas ? <span style={{ color: '#ef4444' }}>increased</span> : <span style={{ color: '#64748b' }}>remained stable</span>}.{' '}
+                RPC latency {bLatency < aLatency ? <span style={{ color: '#8B5CF6' }}>improved</span> : <span style={{ color: '#ef4444' }}>degraded</span>}.{' '}
+                Transaction volume {bTx > aTx ? <span style={{ color: '#8B5CF6' }}>grew</span> : <span style={{ color: '#ef4444' }}>declined</span>}.
               </div>
             </div>
           </>
@@ -1344,8 +1329,8 @@ function AnomaliesTab() {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <img src="/Anomalies_Logo.png" alt="Anomalies" style={{ height: 64, width: 'auto' }} />
+        <div>
+          <div style={{ fontSize: 16, fontWeight: 600, color: '#f1f5f9' }}>⚠️ Anomalies</div>
           <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>All network anomalies detected and recorded automatically</div>
         </div>
         <div style={{ fontSize: 13, color: '#64748b' }}>
@@ -1358,16 +1343,15 @@ function AnomaliesTab() {
       ) : anomalies.length === 0 ? (
         <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '3rem', textAlign: 'center' }}>
           <div style={{ fontSize: 32, marginBottom: 12 }}>✅</div>
-          <div style={{ fontSize: 15, fontWeight: 500, color: '#1D9E75', marginBottom: 6 }}>No anomalies detected</div>
-          <div style={{ fontSize: 13, color: '#475569' }}>The Arc testnet has been running smoothly. All recorded snapshots are within normal parameters.</div>
+          <div style={{ fontSize: 15, fontWeight: 500, color: '#8B5CF6', marginBottom: 6 }}>No anomalies detected</div>
+          <div style={{ fontSize: 13, color: '#475569' }}>The Seismic testnet has been running smoothly. All recorded snapshots are within normal parameters.</div>
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 12 }}>
-          {/* List */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {anomalies.map(a => {
               const isCritical = (a as any).anomaly_severity === 'critical'
-              const color = isCritical ? '#ef4444' : '#EF9F27'
+              const color = isCritical ? '#ef4444' : '#F59E0B'
               return (
                 <div key={a.id} onClick={() => setSelected(a)}
                   style={{ background: selected?.id === a.id ? '#1a1010' : '#13131a', border: `1px solid ${selected?.id === a.id ? color : '#1e1e2e'}`, borderRadius: 10, padding: '0.875rem 1rem', cursor: 'pointer' }}>
@@ -1384,13 +1368,12 @@ function AnomaliesTab() {
             })}
           </div>
 
-          {/* Detail */}
           <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1.25rem' }}>
             {!selected ? (
               <div style={{ fontSize: 13, color: '#475569', textAlign: 'center', marginTop: '3rem' }}>← Select an anomaly to view details</div>
             ) : (() => {
               const isCritical = (selected as any).anomaly_severity === 'critical'
-              const color = isCritical ? '#ef4444' : '#EF9F27'
+              const color = isCritical ? '#ef4444' : '#F59E0B'
               const score = (selected as any).health_score ?? 0
               return (
                 <>
@@ -1406,9 +1389,9 @@ function AnomaliesTab() {
 
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: '1.25rem' }}>
                     <MetricCard label="Health Score" value={score} unit="at detection" color={color} />
-                    <MetricCard label="Block time" value={`${selected.block_time_avg}s`} unit="seconds" color="#378ADD" />
+                    <MetricCard label="Block time" value={`${selected.block_time_avg}s`} unit="seconds" color="#38BDF8" />
                     <MetricCard label="RPC latency" value={`${selected.rpc_latency}ms`} unit="milliseconds" color="#A78BFA" />
-                    <MetricCard label="Gas price" value={`${selected.gas_price}`} unit="gwei" color="#EF9F27" />
+                    <MetricCard label="Gas price" value={`${selected.gas_price}`} unit="gwei" color="#F59E0B" />
                   </div>
 
                   <div style={{ background: '#0a0a0f', borderRadius: 8, padding: '1rem', fontSize: 13, color: '#94a3b8', lineHeight: 1.8 }}>
@@ -1435,25 +1418,25 @@ function AnomaliesTab() {
 }
 
 // ─── NETWORK COMPARISON TAB ──────────────────────────────────────
-interface NetworkData {
+interface CompNetworkData {
   name: string
   blockTime: number | null
   gasGwei: number | null
   latency: number | null
   color: string
   rpc: string
-  isArc?: boolean
+  isSeismic?: boolean
 }
 
-const NETWORKS: NetworkData[] = [
-  { name: 'Arc Testnet', blockTime: null, gasGwei: null, latency: null, color: '#1D9E75', rpc: 'https://rpc.testnet.arc.network', isArc: true },
+const NETWORKS: CompNetworkData[] = [
+  { name: 'Seismic Testnet', blockTime: null, gasGwei: null, latency: null, color: '#8B5CF6', rpc: RPC_HTTP, isSeismic: true },
   { name: 'Ethereum', blockTime: null, gasGwei: null, latency: null, color: '#627EEA', rpc: 'https://ethereum.publicnode.com' },
   { name: 'Polygon', blockTime: null, gasGwei: null, latency: null, color: '#8247E5', rpc: 'https://polygon.publicnode.com' },
   { name: 'BNB Chain', blockTime: null, gasGwei: null, latency: null, color: '#F3BA2F', rpc: 'https://bsc.publicnode.com' },
   { name: 'Arbitrum', blockTime: null, gasGwei: null, latency: null, color: '#28A0F0', rpc: 'https://arbitrum-one.publicnode.com' },
 ]
 
-async function fetchNetworkData(network: NetworkData): Promise<NetworkData> {
+async function fetchNetworkData(network: CompNetworkData): Promise<CompNetworkData> {
   try {
     const t0 = Date.now()
     const res = await fetch(network.rpc, {
@@ -1465,7 +1448,6 @@ async function fetchNetworkData(network: NetworkData): Promise<NetworkData> {
     const data = await res.json()
     const latest = parseInt(data.result, 16)
 
-    // Get gas price
     const gasRes = await fetch(network.rpc, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1474,7 +1456,6 @@ async function fetchNetworkData(network: NetworkData): Promise<NetworkData> {
     const gasData = await gasRes.json()
     const gasGwei = parseInt(gasData.result, 16) / 1e9
 
-    // Get last 5 blocks for avg block time
     const blockNums = Array.from({ length: 5 }, (_, i) => latest - 4 + i)
     const blocks = await Promise.all(blockNums.map(async n => {
       const r = await fetch(network.rpc, {
@@ -1486,10 +1467,15 @@ async function fetchNetworkData(network: NetworkData): Promise<NetworkData> {
       return d.result
     }))
 
+    // Every other network here uses standard Ethereum integer-second
+    // timestamps — only Seismic's RPC returns milliseconds (see
+    // seismicTimestampToSeconds in lib/chain.ts), so it's the only one that
+    // needs the /1000 correction.
+    const toSeconds = network.isSeismic ? seismicTimestampToSeconds : (h: string) => parseInt(h, 16)
     const times: number[] = []
     for (let i = 1; i < blocks.length; i++) {
       if (blocks[i] && blocks[i-1]) {
-        times.push(parseInt(blocks[i].timestamp, 16) - parseInt(blocks[i-1].timestamp, 16))
+        times.push(toSeconds(blocks[i].timestamp) - toSeconds(blocks[i-1].timestamp))
       }
     }
     const avgBlockTime = times.length > 0 ? times.reduce((a, b) => a + b, 0) / times.length : null
@@ -1516,7 +1502,7 @@ function ComparisonBar({ value, max, color, unit }: { value: number | null; max:
 }
 
 function NetworkComparisonTab() {
-  const [networks, setNetworks] = useState<NetworkData[]>(NETWORKS)
+  const [networks, setNetworks] = useState<CompNetworkData[]>(NETWORKS)
   const [loading, setLoading] = useState(true)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
 
@@ -1534,14 +1520,14 @@ function NetworkComparisonTab() {
   const maxGas = Math.max(...networks.map(n => n.gasGwei ?? 0), 50)
   const maxLatency = Math.max(...networks.map(n => n.latency ?? 0), 500)
 
-  const arc = networks.find(n => n.isArc)
+  const seismic = networks.find(n => n.isSeismic)
 
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
         <div>
           <div style={{ fontSize: 16, fontWeight: 600, color: '#f1f5f9' }}>Network Comparison</div>
-          <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>Arc Testnet vs major EVM networks — real-time data</div>
+          <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>Seismic Testnet vs major EVM networks — real-time data</div>
         </div>
         <button onClick={loadAll} disabled={loading}
           style={{ fontSize: 12, padding: '6px 14px', borderRadius: 8, border: '1px solid #1e1e2e', background: 'transparent', color: '#94a3b8', cursor: 'pointer' }}>
@@ -1549,22 +1535,21 @@ function NetworkComparisonTab() {
         </button>
       </div>
 
-      {/* Arc highlight */}
-      {arc && !loading && (
-        <div style={{ background: '#0d2b1f', border: '1px solid #1D9E75', borderRadius: 12, padding: '1rem 1.25rem', marginBottom: '1.25rem', display: 'flex', gap: 20, flexWrap: 'wrap' }}>
-          <div style={{ fontSize: 13, color: '#1D9E75', fontWeight: 600, marginBottom: 4, width: '100%' }}>
-            ⚡ Arc Testnet Performance
+      {seismic && !loading && (
+        <div style={{ background: '#150d2b', border: '1px solid #8B5CF6', borderRadius: 12, padding: '1rem 1.25rem', marginBottom: '1.25rem', display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+          <div style={{ fontSize: 13, color: '#8B5CF6', fontWeight: 600, marginBottom: 4, width: '100%' }}>
+            🔒 Seismic Testnet Performance
           </div>
           <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: 22, fontWeight: 700, color: '#1D9E75' }}>{arc.blockTime?.toFixed(2) ?? '—'}s</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: '#8B5CF6' }}>{seismic.blockTime?.toFixed(2) ?? '—'}s</div>
             <div style={{ fontSize: 11, color: '#475569' }}>Block time</div>
           </div>
           <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: 22, fontWeight: 700, color: '#EF9F27' }}>{arc.gasGwei ?? '—'} gwei</div>
-            <div style={{ fontSize: 11, color: '#475569' }}>Gas price (USDC)</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: '#F59E0B' }}>{seismic.gasGwei ?? '—'} gwei</div>
+            <div style={{ fontSize: 11, color: '#475569' }}>Gas price (ETH)</div>
           </div>
           <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: 22, fontWeight: 700, color: '#A78BFA' }}>{arc.latency ?? '—'}ms</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color: '#A78BFA' }}>{seismic.latency ?? '—'}ms</div>
             <div style={{ fontSize: 11, color: '#475569' }}>RPC latency</div>
           </div>
         </div>
@@ -1576,7 +1561,6 @@ function NetworkComparisonTab() {
         </div>
       ) : (
         <>
-          {/* Block Time */}
           <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1.25rem', marginBottom: '1rem' }}>
             <div style={{ fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '1rem' }}>
               ⏱ Block Time — lower is faster
@@ -1585,8 +1569,8 @@ function NetworkComparisonTab() {
               {[...networks].sort((a, b) => (a.blockTime ?? 999) - (b.blockTime ?? 999)).map((n, i) => (
                 <div key={n.name}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                    <span style={{ fontSize: 13, color: n.isArc ? '#1D9E75' : '#f1f5f9', fontWeight: n.isArc ? 600 : 400 }}>
-                      {n.isArc ? '⚡ ' : ''}{n.name} {i === 0 && '🏆'}
+                    <span style={{ fontSize: 13, color: n.isSeismic ? '#8B5CF6' : '#f1f5f9', fontWeight: n.isSeismic ? 600 : 400 }}>
+                      {n.isSeismic ? '🔒 ' : ''}{n.name} {i === 0 && '🏆'}
                     </span>
                   </div>
                   <ComparisonBar value={n.blockTime !== null ? parseFloat(n.blockTime.toFixed(2)) : null} max={maxBlockTime} color={n.color} unit="s" />
@@ -1595,7 +1579,6 @@ function NetworkComparisonTab() {
             </div>
           </div>
 
-          {/* Gas Price */}
           <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1.25rem', marginBottom: '1rem' }}>
             <div style={{ fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '1rem' }}>
               ⛽ Gas Price (gwei) — lower is cheaper
@@ -1604,20 +1587,16 @@ function NetworkComparisonTab() {
               {[...networks].sort((a, b) => (a.gasGwei ?? 999) - (b.gasGwei ?? 999)).map((n, i) => (
                 <div key={n.name}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                    <span style={{ fontSize: 13, color: n.isArc ? '#1D9E75' : '#f1f5f9', fontWeight: n.isArc ? 600 : 400 }}>
-                      {n.isArc ? '⚡ ' : ''}{n.name} {i === 0 && '🏆'}
+                    <span style={{ fontSize: 13, color: n.isSeismic ? '#8B5CF6' : '#f1f5f9', fontWeight: n.isSeismic ? 600 : 400 }}>
+                      {n.isSeismic ? '🔒 ' : ''}{n.name} {i === 0 && '🏆'}
                     </span>
                   </div>
                   <ComparisonBar value={n.gasGwei} max={maxGas} color={n.color} unit=" gwei" />
                 </div>
               ))}
             </div>
-            <div style={{ fontSize: 11, color: '#334155', marginTop: 10 }}>
-              * Arc gas is paid in USDC — no token volatility exposure
-            </div>
           </div>
 
-          {/* RPC Latency */}
           <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1.25rem' }}>
             <div style={{ fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '1rem' }}>
               📡 RPC Latency (ms) — lower is better
@@ -1626,8 +1605,8 @@ function NetworkComparisonTab() {
               {[...networks].sort((a, b) => (a.latency ?? 999) - (b.latency ?? 999)).map((n, i) => (
                 <div key={n.name}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                    <span style={{ fontSize: 13, color: n.isArc ? '#1D9E75' : '#f1f5f9', fontWeight: n.isArc ? 600 : 400 }}>
-                      {n.isArc ? '⚡ ' : ''}{n.name} {i === 0 && '🏆'}
+                    <span style={{ fontSize: 13, color: n.isSeismic ? '#8B5CF6' : '#f1f5f9', fontWeight: n.isSeismic ? 600 : 400 }}>
+                      {n.isSeismic ? '🔒 ' : ''}{n.name} {i === 0 && '🏆'}
                     </span>
                   </div>
                   <ComparisonBar value={n.latency} max={maxLatency} color={n.color} unit="ms" />
@@ -1647,58 +1626,50 @@ function NetworkComparisonTab() {
   )
 }
 
-// ─── MEMO ACTIVITY MONITOR ───────────────────────────────────────
-const MEMO_CONTRACT = '0x5294E9927c3306DcBaDb03fe70b92e01cCede505'
-// Window of recent blocks scanned for memo activity. Arc's sub-1s block time means
-// a narrow window slides out from under recent txs almost immediately, so this is
-// kept wide (~2000 blocks) rather than the old 200-block window.
-const MEMO_SCAN_RANGE = 2000
-// How many blocks we fetch concurrently per round, so we don't fire 2000 parallel
-// requests at the public RPC at once.
-const MEMO_SCAN_BATCH_SIZE = 50
+// ─── SHIELDED ACTIVITY MONITOR ────────────────────────────────────
+// Seismic's shielded transaction type (0x4A) carries encrypted calldata,
+// decrypted only inside the TEE — see docs.seismic.systems/overview/how-seismic-works.
+// Unlike Arc's Memo Activity (a single well-known contract), shielded txs can
+// target *any* contract, so detection is by tx.type, not by a recipient address.
+const SHIELDED_SCAN_RANGE = 2000
+const SHIELDED_SCAN_BATCH_SIZE = 50
 
-interface MemoTx {
+interface ShieldedTx {
   hash: string
   block: number
-  memoId: string
   target: string
   timestamp: number
 }
 
-interface MemoStats {
-  totalMemos: number
+interface ShieldedStats {
+  totalShielded: number
+  totalTx: number
   uniqueTargets: number
-  memosPerHour: number
-  recentMemos: MemoTx[]
+  shieldedPerHour: number
+  recentShielded: ShieldedTx[]
   blocksScanned: number
 }
 
-function MemoActivityTab() {
-  const [stats, setStats] = useState<MemoStats | null>(null)
+function ShieldedActivityTab() {
+  const [stats, setStats] = useState<ShieldedStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
 
-  async function loadMemoData() {
+  async function loadShieldedData() {
     setLoading(true)
     try {
       const blockHex = await rpcCall('eth_blockNumber')
       const latest = hexToNum(blockHex)
-      const scanRange = MEMO_SCAN_RANGE
-      const fromBlock = Math.max(0, latest - scanRange)
+      const fromBlock = Math.max(0, latest - SHIELDED_SCAN_RANGE)
 
-      // Scan every block in the range for txs sent to the Memo contract — not a
-      // sparse sample. With sub-1s block times, a handful of test memo txs can
-      // land anywhere in the window, so sampling a fraction of blocks would
-      // mean mostly missing them. We fetch in batches to stay friendly to the
-      // public RPC instead of firing thousands of requests at once.
       const allBlockNums = Array.from(
         { length: latest - fromBlock + 1 },
         (_, i) => fromBlock + i
       )
 
       const blocks: any[] = []
-      for (let i = 0; i < allBlockNums.length; i += MEMO_SCAN_BATCH_SIZE) {
-        const chunk = allBlockNums.slice(i, i + MEMO_SCAN_BATCH_SIZE)
+      for (let i = 0; i < allBlockNums.length; i += SHIELDED_SCAN_BATCH_SIZE) {
+        const chunk = allBlockNums.slice(i, i + SHIELDED_SCAN_BATCH_SIZE)
         const chunkResults = await Promise.all(
           chunk.map(n =>
             rpcCall('eth_getBlockByNumber', ['0x' + n.toString(16), true]).catch(() => null)
@@ -1707,38 +1678,38 @@ function MemoActivityTab() {
         blocks.push(...chunkResults)
       }
 
-      const memoTxs: MemoTx[] = []
+      const shieldedTxs: ShieldedTx[] = []
       const targets = new Set<string>()
+      let totalTx = 0
 
       for (const block of blocks) {
         if (!block?.transactions) continue
         for (const tx of block.transactions) {
-          if (tx.to?.toLowerCase() === MEMO_CONTRACT.toLowerCase()) {
-            const memoId = tx.input?.slice(74, 138) ?? '0x'
-            const target = '0x' + (tx.input?.slice(34, 74) ?? '').toLowerCase()
+          totalTx++
+          if (tx.type?.toLowerCase() === SHIELDED_TX_TYPE) {
+            const target = (tx.to ?? 'contract creation').toLowerCase()
             targets.add(target)
-            memoTxs.push({
+            shieldedTxs.push({
               hash: tx.hash,
               block: hexToNum(block.number),
-              memoId: '0x' + memoId.slice(0, 16) + '...',
-              target: target.slice(0, 10) + '...',
-              timestamp: hexToNum(block.timestamp),
+              target,
+              timestamp: seismicTimestampToSeconds(block.timestamp),
             })
           }
         }
       }
 
-      // Calculate memos per hour
       const now = Math.floor(Date.now() / 1000)
       const oneHourAgo = now - 3600
-      const recentCount = memoTxs.filter(m => m.timestamp > oneHourAgo).length
+      const recentCount = shieldedTxs.filter(m => m.timestamp > oneHourAgo).length
 
       setStats({
-        totalMemos: memoTxs.length,
+        totalShielded: shieldedTxs.length,
+        totalTx,
         uniqueTargets: targets.size,
-        memosPerHour: recentCount,
-        recentMemos: memoTxs.sort((a, b) => b.timestamp - a.timestamp).slice(0, 10),
-        blocksScanned: scanRange,
+        shieldedPerHour: recentCount,
+        recentShielded: shieldedTxs.sort((a, b) => b.timestamp - a.timestamp).slice(0, 10),
+        blocksScanned: SHIELDED_SCAN_RANGE,
       })
       setLastUpdated(new Date())
     } catch (e) {
@@ -1747,72 +1718,72 @@ function MemoActivityTab() {
     setLoading(false)
   }
 
-  useEffect(() => { loadMemoData() }, [])
+  useEffect(() => { loadShieldedData() }, [])
+
+  const shieldedPct = stats && stats.totalTx > 0 ? ((stats.totalShielded / stats.totalTx) * 100).toFixed(2) : '0.00'
 
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
         <div>
-          <div style={{ fontSize: 16, fontWeight: 600, color: '#f1f5f9' }}>Memo Activity</div>
+          <div style={{ fontSize: 16, fontWeight: 600, color: '#f1f5f9' }}>🔒 Shielded Activity</div>
           <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>
-            Transaction memos on Arc — new in v0.7.2 hardfork (Jun 18, 2026)
+            Type-0x4A encrypted transactions on Seismic — calldata visible only inside the TEE
           </div>
         </div>
-        <button onClick={loadMemoData} disabled={loading}
+        <button onClick={loadShieldedData} disabled={loading}
           style={{ fontSize: 12, padding: '6px 14px', borderRadius: 8, border: '1px solid #1e1e2e', background: 'transparent', color: '#94a3b8', cursor: 'pointer' }}>
           ↻ Refresh
         </button>
       </div>
 
-      {/* What are memos */}
-      <div style={{ background: '#0c1a2e', border: '1px solid #378ADD44', borderRadius: 12, padding: '1rem 1.25rem', marginBottom: '1.25rem' }}>
-        <div style={{ fontSize: 13, fontWeight: 500, color: '#378ADD', marginBottom: 6 }}>📋 What are Transaction Memos?</div>
+      {/* What are shielded txs */}
+      <div style={{ background: '#150d2b', border: '1px solid #8B5CF644', borderRadius: 12, padding: '1rem 1.25rem', marginBottom: '1.25rem' }}>
+        <div style={{ fontSize: 13, fontWeight: 500, color: '#8B5CF6', marginBottom: 6 }}>🔒 What is a shielded transaction?</div>
         <div style={{ fontSize: 12, color: '#64748b', lineHeight: 1.7 }}>
-          Launched with Arc v0.7.2, transaction memos let developers attach structured metadata — invoice IDs, payment references, customer identifiers — directly to USDC transfers and contract calls. The memo is preserved onchain via the <span style={{ color: '#378ADD', fontFamily: 'monospace' }}>Memo</span> contract at <span style={{ color: '#378ADD', fontFamily: 'monospace' }}>0x5294...e505</span>, enabling reconciliation and analytics without modifying existing contracts.
+          Seismic's transaction type <span style={{ color: '#8B5CF6', fontFamily: 'monospace' }}>0x4A</span> carries calldata encrypted client-side via ECDH + AEAD. The Seismic node decrypts it only inside its Intel TDX TEE, executes the call, and writes results to shielded storage — the plaintext calldata is never visible in the mempool, block data, or transaction traces. Sender, recipient, and gas usage remain public; only the function arguments are hidden.
         </div>
       </div>
 
       {loading ? (
         <div style={{ fontSize: 13, color: '#475569', textAlign: 'center', padding: '3rem' }}>
-          Scanning last {MEMO_SCAN_RANGE} blocks for memo activity... (may take a few seconds)
+          Scanning last {SHIELDED_SCAN_RANGE} blocks for shielded activity... (may take a few seconds)
         </div>
       ) : stats ? (
         <>
-          {/* Stats */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, marginBottom: '1.25rem' }}>
             <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1rem 1.25rem' }}>
-              <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Memo Txs Found</div>
-              <div style={{ fontSize: 26, fontWeight: 600, color: '#378ADD' }}>{stats.totalMemos}</div>
+              <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Shielded Txs Found</div>
+              <div style={{ fontSize: 26, fontWeight: 600, color: '#8B5CF6' }}>{stats.totalShielded}</div>
               <div style={{ fontSize: 12, color: '#475569', marginTop: 3 }}>last {stats.blocksScanned} blocks</div>
+            </div>
+            <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1rem 1.25rem' }}>
+              <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Share of All Txs</div>
+              <div style={{ fontSize: 26, fontWeight: 600, color: '#F59E0B' }}>{shieldedPct}%</div>
+              <div style={{ fontSize: 12, color: '#475569', marginTop: 3 }}>of {stats.totalTx.toLocaleString()} scanned</div>
             </div>
             <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1rem 1.25rem' }}>
               <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Unique Targets</div>
               <div style={{ fontSize: 26, fontWeight: 600, color: '#A78BFA' }}>{stats.uniqueTargets}</div>
-              <div style={{ fontSize: 12, color: '#475569', marginTop: 3 }}>contracts receiving memos</div>
+              <div style={{ fontSize: 12, color: '#475569', marginTop: 3 }}>contracts receiving shielded calls</div>
             </div>
             <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1rem 1.25rem' }}>
               <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Last Hour</div>
-              <div style={{ fontSize: 26, fontWeight: 600, color: '#1D9E75' }}>{stats.memosPerHour}</div>
-              <div style={{ fontSize: 12, color: '#475569', marginTop: 3 }}>memo txs</div>
-            </div>
-            <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1rem 1.25rem' }}>
-              <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Memo Contract</div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: '#EF9F27', fontFamily: 'monospace' }}>0x5294...e505</div>
-              <div style={{ fontSize: 12, color: '#475569', marginTop: 3 }}>Arc v0.7.2</div>
+              <div style={{ fontSize: 26, fontWeight: 600, color: '#38BDF8' }}>{stats.shieldedPerHour}</div>
+              <div style={{ fontSize: 12, color: '#475569', marginTop: 3 }}>shielded txs</div>
             </div>
           </div>
 
-          {/* Recent memos */}
           <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1.25rem' }}>
             <div style={{ fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '1rem' }}>
-              Recent memo transactions
+              Recent shielded transactions
             </div>
-            {stats.recentMemos.length === 0 ? (
+            {stats.recentShielded.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '2rem' }}>
-                <div style={{ fontSize: 32, marginBottom: 12 }}>📭</div>
-                <div style={{ fontSize: 14, fontWeight: 500, color: '#f1f5f9', marginBottom: 6 }}>No memo transactions found yet</div>
-                <div style={{ fontSize: 12, color: '#475569', maxWidth: 400, margin: '0 auto' }}>
-                  Transaction memos were just launched with v0.7.2 on June 18, 2026. Be the first to use them! Check the <a href="https://docs.arc.io/arc/tutorials/send-usdc-with-transaction-memo" target="_blank" rel="noopener noreferrer" style={{ color: '#378ADD' }}>quickstart guide</a>.
+                <div style={{ fontSize: 32, marginBottom: 12 }}>🔓</div>
+                <div style={{ fontSize: 14, fontWeight: 500, color: '#f1f5f9', marginBottom: 6 }}>No shielded transactions found yet</div>
+                <div style={{ fontSize: 12, color: '#475569', maxWidth: 420, margin: '0 auto' }}>
+                  Deploy an SRC20 or another contract with shielded (<span style={{ fontFamily: 'monospace' }}>suint</span>/<span style={{ fontFamily: 'monospace' }}>sint</span>/<span style={{ fontFamily: 'monospace' }}>saddress</span>) types and send an encrypted write to see it here. Check the <a href="https://docs.seismic.systems/tutorials/src20" target="_blank" rel="noopener noreferrer" style={{ color: '#8B5CF6' }}>SRC20 tutorial</a>.
                 </div>
               </div>
             ) : (
@@ -1822,22 +1793,20 @@ function MemoActivityTab() {
                     <th style={{ textAlign: 'left', paddingBottom: 8, fontWeight: 500 }}>Tx Hash</th>
                     <th style={{ textAlign: 'left', paddingBottom: 8, fontWeight: 500 }}>Block</th>
                     <th style={{ textAlign: 'left', paddingBottom: 8, fontWeight: 500 }}>Target</th>
-                    <th style={{ textAlign: 'left', paddingBottom: 8, fontWeight: 500 }}>Memo ID</th>
                     <th style={{ textAlign: 'right', paddingBottom: 8, fontWeight: 500 }}>Age</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {stats.recentMemos.map(m => (
+                  {stats.recentShielded.map(m => (
                     <tr key={m.hash} style={{ borderTop: '1px solid #1e1e2e' }}>
-                      <td style={{ padding: '8px 0', color: '#378ADD', fontFamily: 'monospace' }}>
-                        <a href={`https://testnet.arcscan.app/tx/${m.hash}`} target="_blank" rel="noopener noreferrer"
-                          style={{ color: '#378ADD', textDecoration: 'none' }}>
+                      <td style={{ padding: '8px 0', color: '#38BDF8', fontFamily: 'monospace' }}>
+                        <a href={`${EXPLORER_URL}/tx/${m.hash}`} target="_blank" rel="noopener noreferrer"
+                          style={{ color: '#38BDF8', textDecoration: 'none' }}>
                           {m.hash.slice(0, 8)}...{m.hash.slice(-6)}
                         </a>
                       </td>
-                      <td style={{ padding: '8px 0', color: '#1D9E75' }}>#{m.block.toLocaleString()}</td>
-                      <td style={{ padding: '8px 0', color: '#94a3b8', fontFamily: 'monospace' }}>{m.target}</td>
-                      <td style={{ padding: '8px 0', color: '#EF9F27', fontFamily: 'monospace' }}>{m.memoId}</td>
+                      <td style={{ padding: '8px 0', color: '#8B5CF6' }}>#{m.block.toLocaleString()}</td>
+                      <td style={{ padding: '8px 0', color: '#94a3b8', fontFamily: 'monospace' }}>{m.target.slice(0, 10)}...</td>
                       <td style={{ padding: '8px 0', textAlign: 'right', color: '#64748b' }}>{timeAgo(m.timestamp)}</td>
                     </tr>
                   ))}
@@ -1848,611 +1817,13 @@ function MemoActivityTab() {
 
           {lastUpdated && (
             <div style={{ fontSize: 11, color: '#334155', marginTop: '1rem', textAlign: 'right' }}>
-              Last updated: {lastUpdated.toLocaleTimeString()} · Memo contract: {MEMO_CONTRACT}
+              Last updated: {lastUpdated.toLocaleTimeString()} · Detected via tx.type === {SHIELDED_TX_TYPE}
             </div>
           )}
         </>
       ) : (
         <div style={{ fontSize: 13, color: '#ef4444', textAlign: 'center', padding: '2rem' }}>
-          Failed to load memo data. Please try refreshing.
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ─── BATCH TRANSACTIONS MONITOR ──────────────────────────────────
-// Arc v0.7.2 also shipped Multicall3From: batches multiple calls into a single
-// tx like the standard Multicall3, but each subcall keeps the original
-// msg.sender (via Arc's CallFrom precompile) instead of appearing to come
-// from the multicall contract itself. Official address from docs.arc.io —
-// note: docs.arc.io/arc/concepts/execution-layer lists a different-looking
-// truncated address for this contract; the one below (from
-// docs.arc.io/arc/references/contract-addresses, the dedicated reference page)
-// is the one that matches real on-chain activity.
-const MULTICALL3FROM_CONTRACT = '0x522fAf9A91c41c443c66765030741e4AaCe147D0'
-const BATCH_SCAN_RANGE = 2000
-const BATCH_SCAN_BATCH_SIZE = 50
-// Rough heuristic for "gas saved by batching": each call folded into a batch
-// avoids paying Ethereum's ~21,000 gas base tx cost again. Not exact (doesn't
-// account for the multicall contract's own loop overhead), but a reasonable
-// order-of-magnitude estimate — labeled as an estimate in the UI.
-const BASE_TX_GAS = 21000
-
-// Standard Multicall3 ABI (aggregate / aggregate3 / aggregate3Value). Decoded
-// with viem instead of manual byte-slicing, since the latter is fragile
-// against ABI layout assumptions.
-const MULTICALL3_ABI = parseAbi([
-  'function aggregate((address target, bytes callData)[] calls) payable returns (uint256 blockNumber, bytes[] returnData)',
-  'function aggregate3((address target, bool allowFailure, bytes callData)[] calls) payable returns ((bool success, bytes returnData)[] returnData)',
-  'function aggregate3Value((address target, bool allowFailure, uint256 value, bytes callData)[] calls) payable returns ((bool success, bytes returnData)[] returnData)',
-])
-
-function decodeMulticallInput(input: string): { functionName: string; targets: string[] } | null {
-  try {
-    const decoded = decodeFunctionData({ abi: MULTICALL3_ABI, data: input as `0x${string}` })
-    const calls = decoded.args[0] as unknown as { target: string }[]
-    return { functionName: decoded.functionName, targets: calls.map(c => c.target) }
-  } catch {
-    return null
-  }
-}
-
-interface BatchTx {
-  hash: string
-  block: number
-  callCount: number
-  targets: string[]
-  timestamp: number
-  gasUsed: number | null
-}
-
-interface BatchStats {
-  totalBatchTxs: number
-  totalCalls: number
-  estGasSaved: number
-  uniqueTargets: number
-  batchesPerHour: number
-  topTargets: { address: string; count: number }[]
-  recentBatches: BatchTx[]
-  blocksScanned: number
-}
-
-function BatchTransactionsTab() {
-  const [stats, setStats] = useState<BatchStats | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
-
-  async function loadBatchData() {
-    setLoading(true)
-    try {
-      const blockHex = await rpcCall('eth_blockNumber')
-      const latest = hexToNum(blockHex)
-      const scanRange = BATCH_SCAN_RANGE
-      const fromBlock = Math.max(0, latest - scanRange)
-
-      // Full contiguous scan (not sampled) — same approach validated on the
-      // Memo Activity tab, batched to stay friendly to the public RPC.
-      const allBlockNums = Array.from(
-        { length: latest - fromBlock + 1 },
-        (_, i) => fromBlock + i
-      )
-
-      const blocks: any[] = []
-      for (let i = 0; i < allBlockNums.length; i += BATCH_SCAN_BATCH_SIZE) {
-        const chunk = allBlockNums.slice(i, i + BATCH_SCAN_BATCH_SIZE)
-        const chunkResults = await Promise.all(
-          chunk.map(n =>
-            rpcCall('eth_getBlockByNumber', ['0x' + n.toString(16), true]).catch(() => null)
-          )
-        )
-        blocks.push(...chunkResults)
-      }
-
-      const batchTxs: BatchTx[] = []
-      const targetCounts = new Map<string, number>()
-
-      for (const block of blocks) {
-        if (!block?.transactions) continue
-        for (const tx of block.transactions) {
-          if (tx.to?.toLowerCase() !== MULTICALL3FROM_CONTRACT.toLowerCase()) continue
-          const decoded = decodeMulticallInput(tx.input)
-          if (!decoded || decoded.targets.length === 0) continue
-
-          for (const t of decoded.targets) {
-            const key = t.toLowerCase()
-            targetCounts.set(key, (targetCounts.get(key) ?? 0) + 1)
-          }
-
-          batchTxs.push({
-            hash: tx.hash,
-            block: hexToNum(block.number),
-            callCount: decoded.targets.length,
-            targets: decoded.targets,
-            timestamp: hexToNum(block.timestamp),
-            gasUsed: null,
-          })
-        }
-      }
-
-      // Fetch actual gasUsed for matched txs only (a small set, not the full
-      // 2000-block range) so the gas-saved estimate is based on real receipts.
-      for (let i = 0; i < batchTxs.length; i += BATCH_SCAN_BATCH_SIZE) {
-        const chunk = batchTxs.slice(i, i + BATCH_SCAN_BATCH_SIZE)
-        const receipts = await Promise.all(
-          chunk.map(b => rpcCall('eth_getTransactionReceipt', [b.hash]).catch(() => null))
-        )
-        receipts.forEach((r, idx) => {
-          if (r?.gasUsed) chunk[idx].gasUsed = hexToNum(r.gasUsed)
-        })
-      }
-
-      const totalCalls = batchTxs.reduce((sum, b) => sum + b.callCount, 0)
-      const estGasSaved = batchTxs.reduce(
-        (sum, b) => sum + Math.max(0, b.callCount - 1) * BASE_TX_GAS,
-        0
-      )
-
-      const now = Math.floor(Date.now() / 1000)
-      const oneHourAgo = now - 3600
-      const recentCount = batchTxs.filter(b => b.timestamp > oneHourAgo).length
-
-      const topTargets = Array.from(targetCounts.entries())
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 5)
-        .map(([address, count]) => ({ address, count }))
-
-      setStats({
-        totalBatchTxs: batchTxs.length,
-        totalCalls,
-        estGasSaved,
-        uniqueTargets: targetCounts.size,
-        batchesPerHour: recentCount,
-        topTargets,
-        recentBatches: batchTxs.sort((a, b) => b.timestamp - a.timestamp).slice(0, 10),
-        blocksScanned: scanRange,
-      })
-      setLastUpdated(new Date())
-    } catch (e) {
-      console.error(e)
-    }
-    setLoading(false)
-  }
-
-  useEffect(() => { loadBatchData() }, [])
-
-  return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-        <div>
-          <div style={{ fontSize: 16, fontWeight: 600, color: '#f1f5f9' }}>Batch Transactions</div>
-          <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>
-            Multicall3From activity on Arc — new in v0.7.2 hardfork (Jun 18, 2026)
-          </div>
-        </div>
-        <button onClick={loadBatchData} disabled={loading}
-          style={{ fontSize: 12, padding: '6px 14px', borderRadius: 8, border: '1px solid #1e1e2e', background: 'transparent', color: '#94a3b8', cursor: 'pointer' }}>
-          ↻ Refresh
-        </button>
-      </div>
-
-      {/* What is Multicall3From */}
-      <div style={{ background: '#0c1a2e', border: '1px solid #378ADD44', borderRadius: 12, padding: '1rem 1.25rem', marginBottom: '1.25rem' }}>
-        <div style={{ fontSize: 13, fontWeight: 500, color: '#378ADD', marginBottom: 6 }}>📦 What are Batch Transactions?</div>
-        <div style={{ fontSize: 12, color: '#64748b', lineHeight: 1.7 }}>
-          Launched with Arc v0.7.2, <span style={{ color: '#378ADD', fontFamily: 'monospace' }}>Multicall3From</span> lets developers bundle multiple contract calls into a single transaction — like the standard Multicall3 — but each subcall keeps the original caller's address via Arc's CallFrom precompile, instead of appearing to come from the multicall contract. Predeployed at <span style={{ color: '#378ADD', fontFamily: 'monospace' }}>0x522f...47D0</span>.
-        </div>
-      </div>
-
-      {loading ? (
-        <div style={{ fontSize: 13, color: '#475569', textAlign: 'center', padding: '3rem' }}>
-          Scanning last {BATCH_SCAN_RANGE} blocks for batch activity... (may take a few seconds)
-        </div>
-      ) : stats ? (
-        <>
-          {/* Stats */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, marginBottom: '1.25rem' }}>
-            <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1rem 1.25rem' }}>
-              <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Batch Txs Found</div>
-              <div style={{ fontSize: 26, fontWeight: 600, color: '#378ADD' }}>{stats.totalBatchTxs}</div>
-              <div style={{ fontSize: 12, color: '#475569', marginTop: 3 }}>last {stats.blocksScanned} blocks</div>
-            </div>
-            <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1rem 1.25rem' }}>
-              <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Calls Batched</div>
-              <div style={{ fontSize: 26, fontWeight: 600, color: '#A78BFA' }}>{stats.totalCalls}</div>
-              <div style={{ fontSize: 12, color: '#475569', marginTop: 3 }}>across all batch txs</div>
-            </div>
-            <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1rem 1.25rem' }}>
-              <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Unique Targets</div>
-              <div style={{ fontSize: 26, fontWeight: 600, color: '#1D9E75' }}>{stats.uniqueTargets}</div>
-              <div style={{ fontSize: 12, color: '#475569', marginTop: 3 }}>contracts called via batch</div>
-            </div>
-            <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1rem 1.25rem' }}>
-              <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Est. Gas Saved</div>
-              <div style={{ fontSize: 26, fontWeight: 600, color: '#EF9F27' }}>{stats.estGasSaved.toLocaleString()}</div>
-              <div style={{ fontSize: 12, color: '#475569', marginTop: 3 }}>~21k gas / extra call avoided</div>
-            </div>
-            <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1rem 1.25rem' }}>
-              <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Multicall3From</div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: '#EF9F27', fontFamily: 'monospace' }}>0x522f...47D0</div>
-              <div style={{ fontSize: 12, color: '#475569', marginTop: 3 }}>Arc v0.7.2</div>
-            </div>
-          </div>
-
-          {/* Top targets */}
-          {stats.topTargets.length > 0 && (
-            <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1.25rem', marginBottom: '1.25rem' }}>
-              <div style={{ fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.75rem' }}>
-                Contracts most called via batch
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {stats.topTargets.map(t => (
-                  <div key={t.address} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12 }}>
-                    <span style={{ color: '#94a3b8', fontFamily: 'monospace' }}>
-                      {t.address.slice(0, 10)}...{t.address.slice(-6)}
-                    </span>
-                    <span style={{ color: '#A78BFA' }}>{t.count} calls</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Recent batch txs */}
-          <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1.25rem' }}>
-            <div style={{ fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '1rem' }}>
-              Recent batch transactions
-            </div>
-            {stats.recentBatches.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '2rem' }}>
-                <div style={{ fontSize: 32, marginBottom: 12 }}>📭</div>
-                <div style={{ fontSize: 14, fontWeight: 500, color: '#f1f5f9', marginBottom: 6 }}>No batch transactions found yet</div>
-                <div style={{ fontSize: 12, color: '#475569', maxWidth: 400, margin: '0 auto' }}>
-                  Multicall3From was just launched with v0.7.2 on June 18, 2026. Be the first to batch a transaction on Arc!
-                </div>
-              </div>
-            ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                <thead>
-                  <tr style={{ color: '#475569', fontSize: 11, textTransform: 'uppercase' }}>
-                    <th style={{ textAlign: 'left', paddingBottom: 8, fontWeight: 500 }}>Tx Hash</th>
-                    <th style={{ textAlign: 'left', paddingBottom: 8, fontWeight: 500 }}>Block</th>
-                    <th style={{ textAlign: 'left', paddingBottom: 8, fontWeight: 500 }}>Calls</th>
-                    <th style={{ textAlign: 'left', paddingBottom: 8, fontWeight: 500 }}>Targets</th>
-                    <th style={{ textAlign: 'right', paddingBottom: 8, fontWeight: 500 }}>Est. Gas Saved</th>
-                    <th style={{ textAlign: 'right', paddingBottom: 8, fontWeight: 500 }}>Age</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {stats.recentBatches.map(b => {
-                    const uniqueTargets = Array.from(new Set(b.targets.map(t => t.toLowerCase())))
-                    const shown = uniqueTargets.slice(0, 2).map(t => `${t.slice(0, 8)}...${t.slice(-4)}`).join(', ')
-                    const extra = uniqueTargets.length > 2 ? ` +${uniqueTargets.length - 2} more` : ''
-                    return (
-                      <tr key={b.hash} style={{ borderTop: '1px solid #1e1e2e' }}>
-                        <td style={{ padding: '8px 0', color: '#378ADD', fontFamily: 'monospace' }}>
-                          <a href={`https://testnet.arcscan.app/tx/${b.hash}`} target="_blank" rel="noopener noreferrer"
-                            style={{ color: '#378ADD', textDecoration: 'none' }}>
-                            {b.hash.slice(0, 8)}...{b.hash.slice(-6)}
-                          </a>
-                        </td>
-                        <td style={{ padding: '8px 0', color: '#1D9E75' }}>#{b.block.toLocaleString()}</td>
-                        <td style={{ padding: '8px 0', color: '#A78BFA' }}>{b.callCount}</td>
-                        <td style={{ padding: '8px 0', color: '#94a3b8', fontFamily: 'monospace' }}>{shown}{extra}</td>
-                        <td style={{ padding: '8px 0', textAlign: 'right', color: '#EF9F27' }}>
-                          {(Math.max(0, b.callCount - 1) * BASE_TX_GAS).toLocaleString()}
-                        </td>
-                        <td style={{ padding: '8px 0', textAlign: 'right', color: '#64748b' }}>{timeAgo(b.timestamp)}</td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            )}
-          </div>
-
-          {lastUpdated && (
-            <div style={{ fontSize: 11, color: '#334155', marginTop: '1rem', textAlign: 'right' }}>
-              Last updated: {lastUpdated.toLocaleTimeString()} · Multicall3From contract: {MULTICALL3FROM_CONTRACT}
-            </div>
-          )}
-        </>
-      ) : (
-        <div style={{ fontSize: 13, color: '#ef4444', textAlign: 'center', padding: '2rem' }}>
-          Failed to load batch transaction data. Please try refreshing.
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ─── CHAINLINK / CCIP MONITOR ────────────────────────────────────
-// Contract addresses confirmed from:
-//   discord.com/channels/arc (announcement 30/06/2026)
-//   docs.chain.link/resources/link-token-contracts#arc-network
-const CHAINLINK_CONTRACTS = {
-  ccipRouter:              '0xdE4E7FED43FAC37EB21aA0643d9852f75332eab8',
-  armProxy:                '0xD610B8f58689de7755947C05342A2DFaC30ebD57',
-  tokenAdminRegistry:      '0xd3e461C55676B10634a5F81b747c324B85686Dd1',
-  registryModuleOwner:     '0x524B83ae8208490151339c626fd0E35b964483e3',
-  ccipConfig:              '0x3F1f176e347235858DD6Db905DDBA09Eaf25478a',
-  linkToken:               '0x3F1f176e347235858DD6Db905DDBA09Eaf25478a', // same as ccipConfig per Chainlink docs
-  chainSelector:           '3034092155422581607',
-}
-
-// Minimal ABI selectors (keccak256 of function signature, first 4 bytes)
-// typeAndVersion()           → 0x181f5a77  (returns string — version identifier)
-// isCursed()                 → 0x2e93f7ab  (ARM v2+ — true = CURSED, false = healthy)
-// isBlessed(bytes32[])       → 0x9041be3d  (ARM v1 — inverse logic, needs bytes32[] param)
-// balanceOf(address)         → 0x70a08231  (ERC-20 LINK balance)
-// latestRoundData()          → 0xfeaf968c  (AggregatorV3 — Data Feeds)
-// description()              → 0x7284e416  (AggregatorV3 description string)
-const SEL = {
-  typeAndVersion: '0x181f5a77',
-  isCursed:       '0x2e93f7ab',
-  balanceOf:      '0x70a08231',
-}
-
-function decodeString(hex: string): string {
-  if (!hex || hex === '0x') return ''
-  try {
-    // ABI-encoded string: skip first 32 bytes (offset), next 32 bytes = length, rest = data
-    const data = hex.slice(2)
-    const len = parseInt(data.slice(64, 128), 16)
-    return Buffer.from(data.slice(128, 128 + len * 2), 'hex').toString('utf8').replace(/\x00/g, '').trim()
-  } catch { return '' }
-}
-
-function decodeUint256(hex: string): string | null {
-  if (!hex || hex === '0x') return null
-  try { return String(parseInt(hex.slice(2).slice(-64), 16)) } catch { return null }
-}
-
-function decodeBool(hex: string): boolean | null {
-  // '0x' empty response = the call returned but with no data, treat as false
-  // (ARM isCursed() returns false = not cursed = healthy)
-  if (!hex || hex === '0x' || hex === '0x' + '0'.repeat(64)) return false
-  try {
-    const trimmed = hex.slice(2).replace(/^0+/, '')
-    return trimmed !== '' && trimmed !== '0'
-  } catch { return null }
-}
-
-interface ChainlinkStatus {
-  ccipRouterVersion: string
-  armProxyCursed: boolean | null
-  armProxyVersion: string
-  linkTotalSupplyRaw: string | null
-  recentCcipTxs: { hash: string; block: number; timestamp: number }[]
-  blocksScanned: number
-}
-
-function ChainlinkMonitorTab() {
-  const [status, setStatus] = useState<ChainlinkStatus | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  async function load() {
-    setLoading(true)
-    try {
-      // 1. Check contract versions and ARM curse state — low-cost view calls
-      const [routerVer, armVer, armCursed] = await Promise.all([
-        rpcCall('eth_call', [{ to: CHAINLINK_CONTRACTS.ccipRouter, data: SEL.typeAndVersion }, 'latest']),
-        rpcCall('eth_call', [{ to: CHAINLINK_CONTRACTS.armProxy, data: SEL.typeAndVersion }, 'latest']),
-        rpcCall('eth_call', [{ to: CHAINLINK_CONTRACTS.armProxy, data: SEL.isCursed }, 'latest']),
-      ])
-
-      // 2. Scan recent blocks for CCIP Router activity (txs sent TO the router)
-      // CCIP messages go through the Router, so any tx with router as the target
-      // is a cross-chain send or receive operation.
-      const blockHex = await rpcCall('eth_blockNumber')
-      const latest = hexToNum(blockHex)
-      const SCAN_RANGE = 1000
-      const fromBlock = Math.max(0, latest - SCAN_RANGE)
-
-      const allBlockNums = Array.from(
-        { length: latest - fromBlock + 1 },
-        (_, i) => fromBlock + i
-      )
-
-      const recentCcipTxs: ChainlinkStatus['recentCcipTxs'] = []
-      const BATCH = 50
-      for (let i = 0; i < allBlockNums.length; i += BATCH) {
-        const chunk = allBlockNums.slice(i, i + BATCH)
-        const blocks = await Promise.all(
-          chunk.map(n =>
-            rpcCall('eth_getBlockByNumber', ['0x' + n.toString(16), true]).catch(() => null)
-          )
-        )
-        for (const block of blocks) {
-          if (!block?.transactions) continue
-          for (const tx of block.transactions) {
-            if (tx.to?.toLowerCase() === CHAINLINK_CONTRACTS.ccipRouter.toLowerCase()) {
-              recentCcipTxs.push({
-                hash: tx.hash,
-                block: hexToNum(block.number),
-                timestamp: hexToNum(block.timestamp),
-              })
-            }
-          }
-        }
-        // Stop early if we already have plenty
-        if (recentCcipTxs.length >= 20) break
-      }
-
-      setStatus({
-        ccipRouterVersion: decodeString(routerVer),
-        armProxyVersion:   decodeString(armVer),
-        // ARMProxy 1.0.0 does not have isCursed() — it uses a different interface.
-        // If the call returned null/undefined/empty/zero, we infer "not cursed"
-        // because: (a) the proxy version string confirms the contract IS deployed
-        // and responding, (b) isCursed() returning null most likely means the
-        // function doesn't exist on this version (revert), not that it's cursed.
-        // A truly cursed ARM would halt CCIP operations visibly — if Arc was
-        // cursed, builders would know. So: version present + isCursed null = healthy.
-        armProxyCursed: armCursed == null || armCursed === undefined || armCursed === '0x' || armCursed === ''
-          ? (decodeString(armVer) ? false : null)  // version present → infer not cursed
-          : decodeBool(armCursed),
-        linkTotalSupplyRaw: null,
-        recentCcipTxs: recentCcipTxs.sort((a, b) => b.timestamp - a.timestamp).slice(0, 10),
-        blocksScanned: SCAN_RANGE,
-      })
-    } catch (e) {
-      console.error(e)
-    }
-    setLoading(false)
-  }
-
-  useEffect(() => { load() }, [])
-
-  const armColor = status?.armProxyCursed === false
-    ? '#1D9E75'
-    : status?.armProxyCursed === true
-      ? '#ef4444'
-      : '#475569'
-
-  const armLabel = status?.armProxyCursed === false
-    ? 'Active (not cursed)'
-    : status?.armProxyCursed === true
-      ? '⚠️ CURSED'
-      : 'Checking...'
-
-  return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-        <div>
-          <div style={{ fontSize: 16, fontWeight: 600, color: '#f1f5f9' }}>Chainlink on Arc</div>
-          <div style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>
-            CCIP Router · ARM Proxy · Cross-chain activity — Arc joined Chainlink Scale on June 30, 2026
-          </div>
-        </div>
-        <button onClick={load} disabled={loading}
-          style={{ fontSize: 12, padding: '6px 14px', borderRadius: 8, border: '1px solid #1e1e2e', background: 'transparent', color: '#94a3b8', cursor: 'pointer' }}>
-          ↻ Refresh
-        </button>
-      </div>
-
-      {/* Chainlink Scale info banner */}
-      <div style={{ background: '#0c1a2e', border: '1px solid #375BD244', borderRadius: 12, padding: '1rem 1.25rem', marginBottom: '1.25rem' }}>
-        <div style={{ fontSize: 13, fontWeight: 500, color: '#375BD2', marginBottom: 6 }}>🔗 Chainlink Scale Program</div>
-        <div style={{ fontSize: 12, color: '#64748b', lineHeight: 1.7 }}>
-          Arc joined Chainlink Scale, giving builders access to enterprise-grade oracle and interoperability infrastructure.
-          Available on Arc Testnet: <span style={{ color: '#94a3b8' }}>CCIP</span> (cross-chain messaging),{' '}
-          <span style={{ color: '#94a3b8' }}>Data Feeds</span> (price data),{' '}
-          <span style={{ color: '#94a3b8' }}>Data Streams</span> (low-latency market data),{' '}
-          <span style={{ color: '#94a3b8' }}>Proof of Reserve</span> (collateral verification).
-        </div>
-      </div>
-
-      {loading ? (
-        <div style={{ fontSize: 13, color: '#475569', textAlign: 'center', padding: '3rem' }}>
-          Checking Chainlink contracts on Arc Testnet...
-        </div>
-      ) : status ? (
-        <>
-          {/* Contract status cards */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10, marginBottom: '1.25rem' }}>
-            <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1rem 1.25rem' }}>
-              <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>CCIP Router</div>
-              <div style={{ fontSize: 13, fontWeight: 500, color: status.ccipRouterVersion ? '#1D9E75' : '#ef4444' }}>
-                {status.ccipRouterVersion || 'No response'}
-              </div>
-              <div style={{ fontSize: 11, color: '#475569', fontFamily: 'monospace', marginTop: 4 }}>
-                {CHAINLINK_CONTRACTS.ccipRouter.slice(0, 10)}...{CHAINLINK_CONTRACTS.ccipRouter.slice(-6)}
-              </div>
-            </div>
-
-            <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1rem 1.25rem' }}>
-              <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>ARM Proxy (Risk Manager)</div>
-              <div style={{ fontSize: 13, fontWeight: 500, color: armColor }}>{armLabel}</div>
-              <div style={{ fontSize: 11, color: '#475569', marginTop: 4 }}>{status.armProxyVersion || '—'}</div>
-            </div>
-
-            <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1rem 1.25rem' }}>
-              <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Chain Selector</div>
-              <div style={{ fontSize: 13, fontWeight: 500, color: '#375BD2', fontFamily: 'monospace' }}>
-                {CHAINLINK_CONTRACTS.chainSelector}
-              </div>
-              <div style={{ fontSize: 11, color: '#475569', marginTop: 4 }}>Arc Testnet CCIP identifier</div>
-            </div>
-
-            <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1rem 1.25rem' }}>
-              <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>CCIP Txs Found</div>
-              <div style={{ fontSize: 26, fontWeight: 600, color: '#375BD2' }}>{status.recentCcipTxs.length}</div>
-              <div style={{ fontSize: 11, color: '#475569', marginTop: 4 }}>last {status.blocksScanned} blocks</div>
-            </div>
-          </div>
-
-          {/* Contract addresses reference */}
-          <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1.25rem', marginBottom: '1.25rem' }}>
-            <div style={{ fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.75rem' }}>
-              Contract Addresses (Arc Testnet)
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {[
-                { label: 'CCIP Router',               addr: CHAINLINK_CONTRACTS.ccipRouter },
-                { label: 'ARM Proxy',                 addr: CHAINLINK_CONTRACTS.armProxy },
-                { label: 'Token Admin Registry',      addr: CHAINLINK_CONTRACTS.tokenAdminRegistry },
-                { label: 'Registry Module Owner',     addr: CHAINLINK_CONTRACTS.registryModuleOwner },
-                { label: 'CCIP Config / LINK Token',  addr: CHAINLINK_CONTRACTS.ccipConfig },
-              ].map(({ label, addr }) => (
-                <div key={addr} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, gap: 12 }}>
-                  <span style={{ color: '#64748b' }}>{label}</span>
-                  <a href={`https://testnet.arcscan.app/address/${addr}`} target="_blank" rel="noopener noreferrer"
-                    style={{ color: '#375BD2', fontFamily: 'monospace', textDecoration: 'none' }}>
-                    {addr.slice(0, 10)}...{addr.slice(-6)} ↗
-                  </a>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Recent CCIP txs */}
-          <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1.25rem' }}>
-            <div style={{ fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '1rem' }}>
-              Recent CCIP Router Transactions
-            </div>
-            {status.recentCcipTxs.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '2rem' }}>
-                <div style={{ fontSize: 32, marginBottom: 12 }}>📭</div>
-                <div style={{ fontSize: 14, fontWeight: 500, color: '#f1f5f9', marginBottom: 6 }}>No CCIP transactions yet</div>
-                <div style={{ fontSize: 12, color: '#475569', maxWidth: 400, margin: '0 auto' }}>
-                  Arc joined Chainlink Scale on June 30, 2026. Be one of the first builders to send a cross-chain message via CCIP on Arc Testnet!
-                </div>
-                <a href="https://docs.chain.link/ccip/tutorials/evm/send-arbitrary-data" target="_blank" rel="noopener noreferrer"
-                  style={{ display: 'inline-block', marginTop: 12, fontSize: 12, color: '#375BD2' }}>
-                  Chainlink CCIP Tutorial ↗
-                </a>
-              </div>
-            ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                <thead>
-                  <tr style={{ color: '#475569', fontSize: 11, textTransform: 'uppercase' }}>
-                    <th style={{ textAlign: 'left', paddingBottom: 8, fontWeight: 500 }}>Tx Hash</th>
-                    <th style={{ textAlign: 'left', paddingBottom: 8, fontWeight: 500 }}>Block</th>
-                    <th style={{ textAlign: 'right', paddingBottom: 8, fontWeight: 500 }}>Age</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {status.recentCcipTxs.map(tx => (
-                    <tr key={tx.hash} style={{ borderTop: '1px solid #1e1e2e' }}>
-                      <td style={{ padding: '8px 0' }}>
-                        <a href={`https://testnet.arcscan.app/tx/${tx.hash}`} target="_blank" rel="noopener noreferrer"
-                          style={{ color: '#375BD2', textDecoration: 'none', fontFamily: 'monospace' }}>
-                          {tx.hash.slice(0, 10)}...{tx.hash.slice(-6)} ↗
-                        </a>
-                      </td>
-                      <td style={{ padding: '8px 0', color: '#1D9E75' }}>#{tx.block.toLocaleString()}</td>
-                      <td style={{ padding: '8px 0', textAlign: 'right', color: '#64748b' }}>{timeAgo(tx.timestamp)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </>
-      ) : (
-        <div style={{ fontSize: 13, color: '#ef4444', textAlign: 'center', padding: '2rem' }}>
-          Failed to load Chainlink data. Please refresh.
+          Failed to load shielded activity data. Please try refreshing.
         </div>
       )}
     </div>
@@ -2470,16 +1841,16 @@ function calcScore(blockTime: number, latency: number, gasStability: number) {
 
 function scoreLabel(score: number | null) {
   if (score === null) return { label: '...', color: '#64748b', bg: '#1e1e2e' }
-  if (score >= 90) return { label: 'Excellent', color: '#1D9E75', bg: '#0d2b1f' }
-  if (score >= 70) return { label: 'Good', color: '#EF9F27', bg: '#2b1e0a' }
+  if (score >= 90) return { label: 'Excellent', color: '#8B5CF6', bg: '#150d2b' }
+  if (score >= 70) return { label: 'Good', color: '#F59E0B', bg: '#2b1e0a' }
   if (score >= 50) return { label: 'Degraded', color: '#f97316', bg: '#2b150a' }
   return { label: 'ANOMALY', color: '#ef4444', bg: '#2b0a0a' }
 }
 
 // ─── MAIN APP ─────────────────────────────────────────────────────
 export default function Home() {
-  const [tab, setTab] = useState<'dashboard' | 'reports' | 'compare' | 'anomalies' | 'status' | 'dev' | 'networks' | 'memos' | 'batches' | 'chainlink'>('dashboard')
-  const { data } = useArcData()
+  const [tab, setTab] = useState<'dashboard' | 'reports' | 'compare' | 'anomalies' | 'status' | 'dev' | 'networks' | 'shielded'>('dashboard')
+  const { data } = useSeismicData()
 
   // Self-heal: Vercel's Hobby-plan cron does not retry a failed invocation, so a
   // single hiccup (cold start, Supabase momentarily unreachable, etc.) silently
@@ -2515,15 +1886,12 @@ export default function Home() {
     { id: 'status', label: '⚡ Network Status' },
     { id: 'dev', label: '👨‍💻 Dev Dashboard' },
     { id: 'networks', label: '🌐 Networks' },
-    { id: 'memos', label: '📋 Memo Activity' },
-    { id: 'batches', label: '📦 Batch Transactions' },
-    { id: 'chainlink', label: '🔗 Chainlink' },
+    { id: 'shielded', label: '🔒 Shielded Activity' },
   ] as const
 
   return (
     <main style={{ minHeight: '100vh', background: '#0a0a0f', padding: '1.5rem', maxWidth: 1100, margin: '0 auto' }}>
 
-      {/* Anomaly banner */}
       {isAnomaly && (
         <div style={{ background: '#2b0a0a', border: '1px solid #ef4444', borderRadius: 10, padding: '10px 16px', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ fontSize: 16 }}>⚠️</span>
@@ -2535,14 +1903,16 @@ export default function Home() {
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <img src="/Arc_Logo.png" alt="ArcPulse" style={{ height: 100, width: 'auto' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 32 }}>🔒</span>
+            <span style={{ fontSize: 24, fontWeight: 700, color: '#f1f5f9' }}>SeismicPulse</span>
+          </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#1D9E75', boxShadow: '0 0 8px #1D9E75', animation: 'pulse 2s infinite' }} />
-            <p style={{ fontSize: 12, color: '#64748b' }}>Arc Testnet · Network Health Monitor</p>
+            <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#8B5CF6', boxShadow: '0 0 8px #8B5CF6', animation: 'pulse 2s infinite' }} />
+            <p style={{ fontSize: 12, color: '#64748b' }}>Seismic Testnet · Network Health Monitor</p>
           </div>
         </div>
 
-        {/* Network Score */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <ConnectButton />
           <div style={{ background: bg, border: `1px solid ${color}44`, borderRadius: 12, padding: '10px 18px', textAlign: 'center', minWidth: 110 }}>
@@ -2554,12 +1924,12 @@ export default function Home() {
       </div>
 
       {/* Tabs */}
-      <div style={{ display: 'flex', gap: 4, marginBottom: '1.5rem', background: '#13131a', borderRadius: 10, padding: 4, border: '1px solid #1e1e2e', width: 'fit-content' }}>
+      <div style={{ display: 'flex', gap: 4, marginBottom: '1.5rem', background: '#13131a', borderRadius: 10, padding: 4, border: '1px solid #1e1e2e', width: 'fit-content', flexWrap: 'wrap' }}>
         {tabs.map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
             style={{
               padding: '8px 20px', borderRadius: 8, border: 'none', fontSize: 13, fontWeight: 500, cursor: 'pointer',
-              background: tab === t.id ? '#1D9E75' : 'transparent',
+              background: tab === t.id ? '#8B5CF6' : 'transparent',
               color: tab === t.id ? '#fff' : '#64748b',
             }}>
             {t.label}
@@ -2574,13 +1944,11 @@ export default function Home() {
       {tab === 'status' && <NetworkStatusTab />}
       {tab === 'dev' && <DevDashboardTab />}
       {tab === 'networks' && <NetworkComparisonTab />}
-      {tab === 'memos' && <MemoActivityTab />}
-      {tab === 'batches' && <BatchTransactionsTab />}
-      {tab === 'chainlink' && <ChainlinkMonitorTab />}
+      {tab === 'shielded' && <ShieldedActivityTab />}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '1.5rem', fontSize: 11, color: '#334155' }}>
-        <span>RPC: rpc.testnet.arc.network · Chain ID: 5042002</span>
-        <span>ArcPulse v0.3</span>
+        <span>RPC: {RPC_HTTP.replace('https://', '')} · Chain ID: {CHAIN_ID}</span>
+        <span>SeismicPulse v0.1</span>
       </div>
 
       <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }`}</style>

@@ -1,11 +1,10 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
-
-const RPC = 'https://rpc.testnet.arc.network'
+import { RPC_HTTP, seismicTimestampToSeconds } from '@/lib/chain'
 
 async function rpcCall(method: string, params: unknown[] = []) {
   const t0 = Date.now()
-  const res = await fetch(RPC, {
+  const res = await fetch(RPC_HTTP, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
@@ -16,7 +15,7 @@ async function rpcCall(method: string, params: unknown[] = []) {
 }
 
 const hexToNum = (h: string) => parseInt(h, 16)
-const toGwei = (h: string) => (hexToNum(h) / 1e9).toFixed(2)
+const toGwei = (h: string) => (hexToNum(h) / 1e9).toFixed(4)
 
 export interface Block {
   number: number
@@ -36,7 +35,7 @@ export interface NetworkData {
   lastUpdated: Date | null
 }
 
-export function useArcData() {
+export function useSeismicData() {
   const [data, setData] = useState<NetworkData>({
     latestBlock: 0, chainId: 0, gasPrice: '0',
     rpcLatency: 0, avgBlockTime: 0, blocks: [],
@@ -50,6 +49,9 @@ export function useArcData() {
       const { result: chainHex } = await rpcCall('eth_chainId')
       const { result: gasHex } = await rpcCall('eth_gasPrice')
 
+      // Seismic's block.timestamp has millisecond precision (see
+      // seismicTimestampToSeconds), so a small window is enough for an
+      // accurate live average block time.
       const blockNums = Array.from({ length: 10 }, (_, i) => latest - 9 + i)
       const rawBlocks = await Promise.all(
         blockNums.map(n => rpcCall('eth_getBlockByNumber', ['0x' + n.toString(16), false]).then(r => r.result))
@@ -58,7 +60,7 @@ export function useArcData() {
 
       const blocks: Block[] = valid.map(b => ({
         number: hexToNum(b.number),
-        timestamp: hexToNum(b.timestamp),
+        timestamp: seismicTimestampToSeconds(b.timestamp),
         txCount: b.transactions?.length ?? 0,
         gasUsed: hexToNum(b.gasUsed ?? '0x0'),
       }))
