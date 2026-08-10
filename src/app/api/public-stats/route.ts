@@ -4,8 +4,8 @@ import { RPC_HTTP } from '@/lib/chain'
 
 export const dynamic = 'force-dynamic'
 
-// ─── SeismicPulse Public API ──────────────────────────────────────────────
-// Open, unauthenticated, read-only access to the data SeismicPulse collects
+// ─── SeismicLens Public API ──────────────────────────────────────────────
+// Open, unauthenticated, read-only access to the data SeismicLens collects
 // from the Seismic testnet RPC. No API key required.
 //
 // Endpoints (query param: ?endpoint=<name>):
@@ -74,8 +74,8 @@ export async function GET(req: NextRequest) {
         endpoint: 'latest',
         data,
         meta: {
-          description: 'Most recent SeismicPulse snapshot from Seismic Testnet',
-          source: 'https://seismicpulse.vercel.app',
+          description: 'Most recent SeismicLens snapshot from Seismic Testnet',
+          source: 'https://seismiclens.vercel.app',
           rpc: RPC_HTTP,
         },
       }, { headers: corsHeaders() })
@@ -104,8 +104,8 @@ export async function GET(req: NextRequest) {
         params: { limit, days },
         data,
         meta: {
-          description: `Last ${days} days of SeismicPulse snapshots (max ${limit} rows, newest first)`,
-          source: 'https://seismicpulse.vercel.app',
+          description: `Last ${days} days of SeismicLens snapshots (max ${limit} rows, newest first)`,
+          source: 'https://seismiclens.vercel.app',
           rpc: RPC_HTTP,
         },
       }, { headers: corsHeaders() })
@@ -131,8 +131,8 @@ export async function GET(req: NextRequest) {
       last_7d: summarise(rows7d),
       last_30d: summarise(rows30d),
       meta: {
-        description: 'Aggregated Seismic Testnet health metrics collected by SeismicPulse',
-        source: 'https://seismicpulse.vercel.app',
+        description: 'Aggregated Seismic Testnet health metrics collected by SeismicLens',
+        source: 'https://seismiclens.vercel.app',
         rpc: RPC_HTTP,
         chain_id: 5124,
         endpoints: {

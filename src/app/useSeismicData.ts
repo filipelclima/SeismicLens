@@ -8,6 +8,7 @@ async function rpcCall(method: string, params: unknown[] = []) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+    cache: 'no-store',
   })
   const latency = Date.now() - t0
   const data = await res.json()

@@ -1,8 +1,9 @@
-# SeismicPulse
+# SeismicLens
 
 Dashboard de monitoramento da Seismic blockchain testnet — a privacy-enabled EVM L1 (nodes rodando dentro de TEEs Intel TDX, shielded storage, transações encriptadas tipo `0x4A`). Modelado a partir do [ArcPulse](https://github.com/filipelclima/ArcPulse) (monitor equivalente para a Arc testnet).
 
-- **Deploy:** ainda não deployado — ver `.env.example` para as env vars necessárias antes do primeiro deploy na Vercel.
+- **GitHub:** https://github.com/filipelclima/SeismicLens
+- **Deploy:** publicado na Vercel (Framework Preset: Next.js, ver `vercel.json`) — preencher a URL de produção aqui quando confirmada. Ver `.env.example` para as env vars necessárias.
 - **Rede monitorada:** Seismic Testnet — chain ID `5124`, RPC HTTPS `https://testnet-1.seismictest.net/rpc`, RPC WSS `wss://testnet-1.seismictest.net/ws`, explorer `https://seismic-testnet.socialscan.io`. Config centralizada em `src/lib/chain.ts`.
 - **Docs da Seismic:** https://docs.seismic.systems
 

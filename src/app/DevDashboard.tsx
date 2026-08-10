@@ -7,6 +7,7 @@ async function rpcCall(method: string, params: unknown[] = []) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+    cache: 'no-store',
   })
   const data = await res.json()
   return data.result
@@ -102,12 +103,6 @@ export function ConnectButton() {
     setWalletType(null)
   }
 
-  if (error) {
-    return (
-      <div style={{ fontSize: 12, color: '#ef4444' }}>{error}</div>
-    )
-  }
-
   if (address) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -124,10 +119,16 @@ export function ConnectButton() {
   }
 
   return (
-    <button onClick={connect} disabled={connecting}
-      style={{ background: '#8B5CF6', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: 500, cursor: connecting ? 'not-allowed' : 'pointer', opacity: connecting ? 0.7 : 1, display: 'flex', alignItems: 'center', gap: 6 }}>
-      {connecting ? '⏳ Connecting...' : '🔗 Connect Wallet'}
-    </button>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+      <button onClick={connect} disabled={connecting}
+        style={{ background: '#8B5CF6', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: 500, cursor: connecting ? 'not-allowed' : 'pointer', opacity: connecting ? 0.7 : 1, display: 'flex', alignItems: 'center', gap: 6 }}>
+        {connecting ? '⏳ Connecting...' : '🔗 Connect Wallet'}
+      </button>
+      {/* Error renders alongside the button, not instead of it — a failed
+          eth_requestAccounts (user rejected the popup, wallet locked, etc.)
+          must never leave the header permanently stuck with no way to retry. */}
+      {error && <div style={{ fontSize: 11, color: '#ef4444' }}>{error}</div>}
+    </div>
   )
 }
 

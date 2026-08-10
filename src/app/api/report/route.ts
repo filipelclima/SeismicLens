@@ -1,5 +1,9 @@
 import { NextResponse } from 'next/server'
 
+// Each call must generate a fresh report for whatever snapshots/period were
+// posted — never reuse a previous response for a different day.
+export const dynamic = 'force-dynamic'
+
 export async function POST(req: Request) {
   try {
     const { snapshots, period } = await req.json()
@@ -19,7 +23,7 @@ export async function POST(req: Request) {
     const anomalies = snapshots.filter((s: any) => s.anomaly).length
     const uptime = ((snapshots.length - anomalies) / snapshots.length * 100).toFixed(1)
 
-    const prompt = `You are SeismicPulse, an AI analyst monitoring the Seismic testnet — an EVM L1 with native on-chain privacy (TEE-secured nodes, shielded storage, encrypted type-0x4A transactions). Generate a professional weekly network health report based on the following data.
+    const prompt = `You are SeismicLens, an AI analyst monitoring the Seismic testnet — an EVM L1 with native on-chain privacy (TEE-secured nodes, shielded storage, encrypted type-0x4A transactions). Generate a professional weekly network health report based on the following data.
 
 Period: ${period}
 Total snapshots collected: ${snapshots.length}
@@ -55,6 +59,7 @@ Keep it factual, professional, and useful for the Seismic community. Format it r
         max_tokens: 1024,
         messages: [{ role: 'user', content: prompt }],
       }),
+      cache: 'no-store',
     })
 
     const data = await response.json()

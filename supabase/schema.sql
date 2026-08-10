@@ -1,4 +1,4 @@
--- SeismicPulse — network_snapshots table
+-- SeismicLens — network_snapshots table
 -- Run this once in the Supabase SQL editor for a new project.
 
 create table if not exists network_snapshots (

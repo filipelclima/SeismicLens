@@ -6,7 +6,14 @@ import { RPC_HTTP, SHIELDED_TX_TYPE, seismicTimestampToSeconds } from '@/lib/cha
 // full collection pipeline and insert a new snapshot. Without force-dynamic,
 // Next.js 14 can cache GET handlers in production, causing the Vercel CDN to
 // return a stale response (same block number, no new insert) for hours.
+// force-dynamic alone only stops the *route* from being statically cached —
+// it does NOT disable Next's separate fetch() data cache, which defaults to
+// cache: 'force-cache' in Next 14. Every fetch() to the RPC below needs its
+// own cache: 'no-store', or it'll keep returning the first cached response
+// (same block_number, suspiciously low rpc_latency) on every subsequent hit.
+// revalidate = 0 belt-and-suspenders against any route-level ISR caching.
 export const dynamic = 'force-dynamic'
+export const revalidate = 0
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -46,6 +53,7 @@ async function rpcCall(method: string, params: unknown[] = []) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+    cache: 'no-store',
   })
   const latency = Date.now() - t0
   const data = await res.json()
@@ -88,6 +96,7 @@ async function sampleRpcLatencies(n: number): Promise<number[]> {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] }),
+        cache: 'no-store',
       }).then(r => r.json()).then(() => Date.now() - t0)
     })
   )
@@ -115,7 +124,7 @@ export async function GET() {
       }
     } catch (readErr) {
       await sendDiscordAlert(
-        `⚠️ **SeismicPulse — Supabase read failed**\nCould not query \`network_snapshots\` — Supabase may be unreachable or experiencing an incident.\nError: \`${String(readErr).slice(0, 300)}\`\nCheck https://status.supabase.com`
+        `⚠️ **SeismicLens — Supabase read failed**\nCould not query \`network_snapshots\` — Supabase may be unreachable or experiencing an incident.\nError: \`${String(readErr).slice(0, 300)}\`\nCheck https://status.supabase.com`
       )
     }
 
@@ -183,27 +192,27 @@ export async function GET() {
     if (isAnomaly && !wasAnomaly) {
       if (severity === 'critical') {
         await sendDiscordAlert(
-          `🔴 **SeismicPulse — CRITICAL anomaly detected**\nHealth score collapsed to **${score}/100** (threshold: <50).\nAvg block time: ${avgBlockTime.toFixed(2)}s · RPC latency: ${latency}ms · Block #${latest}.\n> Immediate attention may be required.`
+          `🔴 **SeismicLens — CRITICAL anomaly detected**\nHealth score collapsed to **${score}/100** (threshold: <50).\nAvg block time: ${avgBlockTime.toFixed(2)}s · RPC latency: ${latency}ms · Block #${latest}.\n> Immediate attention may be required.`
         )
       } else {
         await sendDiscordAlert(
-          `🟡 **SeismicPulse — WARNING: network degraded**\nHealth score dropped to **${score}/100** (threshold: <70).\nAvg block time: ${avgBlockTime.toFixed(2)}s · RPC latency: ${latency}ms · Block #${latest}.\n> Monitoring closely — no action needed yet unless it worsens.`
+          `🟡 **SeismicLens — WARNING: network degraded**\nHealth score dropped to **${score}/100** (threshold: <70).\nAvg block time: ${avgBlockTime.toFixed(2)}s · RPC latency: ${latency}ms · Block #${latest}.\n> Monitoring closely — no action needed yet unless it worsens.`
         )
       }
     } else if (isAnomaly && wasAnomaly && severity === 'critical' && prevSeverity === 'warning') {
       await sendDiscordAlert(
-        `🚨 **SeismicPulse — anomaly ESCALATED to CRITICAL**\nHealth score worsened from warning to **${score}/100** (threshold: <50).\nAvg block time: ${avgBlockTime.toFixed(2)}s · RPC latency: ${latency}ms · Block #${latest}.\n> Situation is deteriorating.`
+        `🚨 **SeismicLens — anomaly ESCALATED to CRITICAL**\nHealth score worsened from warning to **${score}/100** (threshold: <50).\nAvg block time: ${avgBlockTime.toFixed(2)}s · RPC latency: ${latency}ms · Block #${latest}.\n> Situation is deteriorating.`
       )
     } else if (!isAnomaly && wasAnomaly) {
       const recovered = prevSeverity === 'critical' ? '🔴 critical' : '🟡 warning'
       await sendDiscordAlert(
-        `✅ **SeismicPulse — network recovered**\nHealth score back to **${score}/100** (was ${recovered}).\nBlock #${latest} — Seismic Testnet is healthy again.`
+        `✅ **SeismicLens — network recovered**\nHealth score back to **${score}/100** (was ${recovered}).\nBlock #${latest} — Seismic Testnet is healthy again.`
       )
     }
 
     if (gapHours !== null && gapHours > STALE_GAP_HOURS) {
       await sendDiscordAlert(
-        `⚠️ **SeismicPulse — collection gap detected**\nNo snapshot was recorded for about **${gapHours.toFixed(1)}h** before this one. Likely cause: a missed cron invocation (no auto-retry on Hobby) or Supabase was unreachable/paused. Collection has now resumed — block #${latest}.`
+        `⚠️ **SeismicLens — collection gap detected**\nNo snapshot was recorded for about **${gapHours.toFixed(1)}h** before this one. Likely cause: a missed cron invocation (no auto-retry on Hobby) or Supabase was unreachable/paused. Collection has now resumed — block #${latest}.`
       )
     }
 
@@ -212,7 +221,7 @@ export async function GET() {
       { headers: { 'Cache-Control': 'no-store' } }
     )
   } catch (e) {
-    await sendDiscordAlert(`🔴 **SeismicPulse — /api/collect failed**\n\`\`\`${String(e).slice(0, 500)}\`\`\``)
+    await sendDiscordAlert(`🔴 **SeismicLens — /api/collect failed**\n\`\`\`${String(e).slice(0, 500)}\`\`\``)
     return NextResponse.json({ success: false, error: String(e) }, { status: 500 })
   }
 }

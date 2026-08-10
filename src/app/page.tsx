@@ -16,6 +16,7 @@ async function rpcCall(method: string, params: unknown[] = []) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+    cache: 'no-store',
   })
   const data = await res.json()
   return data.result
@@ -449,7 +450,7 @@ function ReportsTab() {
           Clear
         </button>
         <div style={{ marginLeft: 'auto' }}>
-          <ExportButtons data={snapshots} filenameBase={`seismicpulse-snapshots${from ? `-${from}` : ''}${to ? `_to_${to}` : ''}`} />
+          <ExportButtons data={snapshots} filenameBase={`seismiclens-snapshots${from ? `-${from}` : ''}${to ? `_to_${to}` : ''}`} />
         </div>
       </div>
 
@@ -504,7 +505,7 @@ function ReportsTab() {
                     </div>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                       <span style={{ fontSize: 13, color: status.color, background: `${status.color}22`, padding: '4px 12px', borderRadius: 8 }}>{status.label}</span>
-                      <ExportButtons data={snaps} filenameBase={`seismicpulse-report-${selected}`} />
+                      <ExportButtons data={snaps} filenameBase={`seismiclens-report-${selected}`} />
                       <button onClick={generateAIReport} disabled={aiLoading}
                         style={{ background: aiLoading ? '#1a1a2e' : '#4f46e5', color: '#fff', border: 'none', borderRadius: 8, padding: '6px 14px', fontSize: 12, fontWeight: 500, cursor: aiLoading ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
                         {aiLoading ? '⏳ Generating...' : '✨ AI Report'}
@@ -742,6 +743,7 @@ function TransportStatusCard() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] }),
+        cache: 'no-store',
       })
       const data = await res.json()
       httpOnline = !!data.result
@@ -842,6 +844,7 @@ function NetworkStatusTab() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] }),
+        cache: 'no-store',
       })
       const latency = Date.now() - t0
       const data = await res.json()
@@ -1276,11 +1279,11 @@ function CompareTab() {
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
               <div style={{ fontSize: 13, color: '#64748b', display: 'flex', alignItems: 'center', gap: 10 }}>
                 Period A: <strong style={{ color: '#f1f5f9' }}>{periodA.from}{periodA.to && periodA.to !== periodA.from ? ` → ${periodA.to}` : ''}</strong> ({dataA.length} snapshots)
-                <ExportButtons data={dataA} filenameBase={`seismicpulse-compare-A-${periodA.from}`} />
+                <ExportButtons data={dataA} filenameBase={`seismiclens-compare-A-${periodA.from}`} />
               </div>
               <div style={{ fontSize: 13, color: '#64748b', display: 'flex', alignItems: 'center', gap: 10 }}>
                 Period B: <strong style={{ color: '#f1f5f9' }}>{periodB.from}{periodB.to && periodB.to !== periodB.from ? ` → ${periodB.to}` : ''}</strong> ({dataB.length} snapshots)
-                <ExportButtons data={dataB} filenameBase={`seismicpulse-compare-B-${periodB.from}`} />
+                <ExportButtons data={dataB} filenameBase={`seismiclens-compare-B-${periodB.from}`} />
               </div>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: '1.25rem' }}>
@@ -1443,6 +1446,7 @@ async function fetchNetworkData(network: CompNetworkData): Promise<CompNetworkDa
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_blockNumber', params: [] }),
+      cache: 'no-store',
     })
     const latency = Date.now() - t0
     const data = await res.json()
@@ -1452,6 +1456,7 @@ async function fetchNetworkData(network: CompNetworkData): Promise<CompNetworkDa
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'eth_gasPrice', params: [] }),
+      cache: 'no-store',
     })
     const gasData = await gasRes.json()
     const gasGwei = parseInt(gasData.result, 16) / 1e9
@@ -1462,6 +1467,7 @@ async function fetchNetworkData(network: CompNetworkData): Promise<CompNetworkDa
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'eth_getBlockByNumber', params: ['0x' + n.toString(16), false] }),
+        cache: 'no-store',
       })
       const d = await r.json()
       return d.result
@@ -1852,27 +1858,14 @@ export default function Home() {
   const [tab, setTab] = useState<'dashboard' | 'reports' | 'compare' | 'anomalies' | 'status' | 'dev' | 'networks' | 'shielded'>('dashboard')
   const { data } = useSeismicData()
 
-  // Self-heal: Vercel's Hobby-plan cron does not retry a failed invocation, so a
-  // single hiccup (cold start, Supabase momentarily unreachable, etc.) silently
-  // skips that day with no second chance until the next scheduled run. As a
-  // backstop, every time someone opens the dashboard we check how old the most
-  // recent snapshot is — if it's stale, we kick off a fresh /api/collect right
-  // away instead of waiting on the cron alone.
-  useEffect(() => {
-    const STALE_HOURS = 26
-    fetch(`${SUPABASE_URL}/rest/v1/network_snapshots?select=created_at&order=created_at.desc&limit=1`, {
-      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
-    })
-      .then(res => res.json())
-      .then((rows: { created_at: string }[]) => {
-        const last = rows?.[0]?.created_at
-        const hoursSince = last ? (Date.now() - new Date(last).getTime()) / 3_600_000 : Infinity
-        if (hoursSince > STALE_HOURS) {
-          fetch('/api/collect').catch(() => {})
-        }
-      })
-      .catch(() => {})
-  }, [])
+  // NOTE: there used to be a "self-heal" effect here that called
+  // fetch('/api/collect') on page load whenever the last snapshot looked
+  // stale. Removed deliberately — collection must only come from the cron
+  // (vercel.json) or a manual trigger, never from a page view. The self-heal
+  // check had no de-duplication, so two people (or two tabs) loading the
+  // dashboard while data was stale would each independently fire their own
+  // /api/collect — the likely cause of the near-simultaneous duplicate
+  // snapshot rows (~200ms apart) observed in Supabase.
 
   const score = calcScore(data.avgBlockTime, data.rpcLatency, 1)
   const { label, color, bg } = scoreLabel(score)
@@ -1905,7 +1898,7 @@ export default function Home() {
         <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span style={{ fontSize: 32 }}>🔒</span>
-            <span style={{ fontSize: 24, fontWeight: 700, color: '#f1f5f9' }}>SeismicPulse</span>
+            <span style={{ fontSize: 24, fontWeight: 700, color: '#f1f5f9' }}>SeismicLens</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <div style={{ width: 8, height: 8, borderRadius: '50%', background: '#8B5CF6', boxShadow: '0 0 8px #8B5CF6', animation: 'pulse 2s infinite' }} />
@@ -1948,7 +1941,7 @@ export default function Home() {
 
       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '1.5rem', fontSize: 11, color: '#334155' }}>
         <span>RPC: {RPC_HTTP.replace('https://', '')} · Chain ID: {CHAIN_ID}</span>
-        <span>SeismicPulse v0.1</span>
+        <span>SeismicLens v0.1</span>
       </div>
 
       <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }`}</style>
