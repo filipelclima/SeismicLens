@@ -75,7 +75,7 @@ export async function GET(req: NextRequest) {
         data,
         meta: {
           description: 'Most recent SeismicLens snapshot from Seismic Testnet',
-          source: 'https://seismiclens.vercel.app',
+          source: 'https://seismic-lens.vercel.app',
           rpc: RPC_HTTP,
         },
       }, { headers: corsHeaders() })
@@ -105,7 +105,7 @@ export async function GET(req: NextRequest) {
         data,
         meta: {
           description: `Last ${days} days of SeismicLens snapshots (max ${limit} rows, newest first)`,
-          source: 'https://seismiclens.vercel.app',
+          source: 'https://seismic-lens.vercel.app',
           rpc: RPC_HTTP,
         },
       }, { headers: corsHeaders() })
@@ -132,7 +132,7 @@ export async function GET(req: NextRequest) {
       last_30d: summarise(rows30d),
       meta: {
         description: 'Aggregated Seismic Testnet health metrics collected by SeismicLens',
-        source: 'https://seismiclens.vercel.app',
+        source: 'https://seismic-lens.vercel.app',
         rpc: RPC_HTTP,
         chain_id: 5124,
         endpoints: {
