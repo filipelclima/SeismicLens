@@ -1,0 +1,35 @@
+name: Trigger network snapshot collection
+
+# Vercel Hobby's own cron (vercel.json) only fires once a day, which isn't
+# frequent enough for useful history — this workflow is the primary
+# collection trigger, running every 30 minutes. The Vercel cron stays as a
+# once-daily backstop in case this workflow itself stops running.
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch: {}
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call /api/collect
+        run: |
+          if [ -z "${{ secrets.PRODUCTION_URL }}" ] || [ -z "${{ secrets.CRON_SECRET }}" ]; then
+            echo "::error::PRODUCTION_URL or CRON_SECRET repo secret is not set"
+            exit 1
+          fi
+
+          http_status=$(curl -sS -o /tmp/collect-response.json -w '%{http_code}' \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.PRODUCTION_URL }}/api/collect")
+
+          echo "HTTP status: $http_status"
+          echo "Response body:"
+          cat /tmp/collect-response.json
+          echo ""
+
+          if [ "$http_status" != "200" ]; then
+            echo "::error::/api/collect returned HTTP $http_status instead of 200 — collection did not succeed"
+            exit 1
+          fi

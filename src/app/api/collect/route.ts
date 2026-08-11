@@ -105,7 +105,25 @@ async function sampleRpcLatencies(n: number): Promise<number[]> {
     .map(r => r.value)
 }
 
-export async function GET() {
+// Vercel's own Cron Jobs (vercel.json) automatically send
+// `Authorization: Bearer ${CRON_SECRET}` on every trigger — Vercel reads
+// that header value from the project's own CRON_SECRET env var, so once
+// it's set in the Vercel dashboard, the built-in cron keeps working with
+// no code change here. Any other caller (the GitHub Actions workflow,
+// manual curl) must send the same header explicitly.
+// process.env.CRON_SECRET is checked for truthiness first — if it's ever
+// unset, authHeader === 'Bearer undefined' would otherwise let an
+// attacker in by literally sending that string.
+function isAuthorized(req: Request): boolean {
+  const cronSecret = process.env.CRON_SECRET
+  if (!cronSecret) return false
+  return req.headers.get('authorization') === `Bearer ${cronSecret}`
+}
+
+export async function GET(req: Request) {
+  if (!isAuthorized(req)) {
+    return NextResponse.json({ success: false, error: 'Unauthorized' }, { status: 401 })
+  }
   try {
     let gapHours: number | null = null
     let wasAnomaly = false

@@ -21,7 +21,7 @@ Dashboard de monitoramento da Seismic blockchain testnet — a privacy-enabled E
 - `src/app/DevDashboard.tsx` — aba Dev Dashboard (Connect Wallet via `window.ethereum` — MetaMask/Rabby/qualquer EIP-1193)
 - `src/app/useSeismicData.ts` — hook de leitura ao vivo da chain (bloco atual, gas, latência RPC)
 - API routes:
-  - `/api/collect` — roda via cron diário (`vercel.json`), faz scrape da RPC, calcula health score, insere snapshot no Supabase, envia alertas no Discord em transições de anomalia
+  - `/api/collect` — protegida por `CRON_SECRET` (ver seção própria abaixo), faz scrape da RPC, calcula health score, insere snapshot no Supabase, envia alertas no Discord em transições de anomalia
   - `/api/report` — gera relatório semanal via Anthropic API a partir dos snapshots de um dia
   - `/api/public-stats` — API pública somente-leitura (CORS aberto) sobre os snapshots coletados
 
@@ -46,6 +46,19 @@ Dashboard de monitoramento da Seismic blockchain testnet — a privacy-enabled E
 
 - Vitest `4.1.10` + Testing Library, ambiente `jsdom`. Config em `vitest.config.mts` / `vitest.setup.mts` — extensão `.mts` de propósito (mesmo motivo do ArcPulse: o `tsconfig.json` inclui `**/*.ts`/`**/*.tsx` sem exclusão de testes, e `.mts` não bate nesse glob, isolando a config de teste do build de produção).
 - Ainda não há teste de exemplo escrito — ao adicionar a próxima feature ou correção, exportar as funções puras relevantes de `page.tsx` (`toCSV`, `exportCSV`, `exportJSON`, `calcScore`, etc.) e escrever o primeiro teste real ali.
+
+## Coleta de snapshots — /api/collect
+
+`/api/collect` exige `Authorization: Bearer ${CRON_SECRET}` — sem o header certo, retorna 401. Duas coisas chamam essa rota, cada uma autenticando de um jeito:
+
+- **Cron do Vercel** (`vercel.json`, 1x/dia — plano Hobby não permite mais frequente): o próprio Vercel injeta automaticamente o header `Authorization: Bearer ${CRON_SECRET}` em toda invocação de um Cron Job, lendo o valor da env var `CRON_SECRET` do projeto — isso é convenção nativa do Vercel, não precisa de código extra pra isso funcionar, só a env var precisa existir no projeto.
+- **GitHub Actions** (`.github/workflows/collect.yml`, a cada 30min + `workflow_dispatch` manual) — é o trigger principal, já que o cron do Vercel sozinho é frequência baixa demais pra gerar histórico útil. Chama a URL de produção via `curl` com o mesmo `CRON_SECRET`, lido de secret do repositório (nunca hardcoded). Falha visivelmente (`exit 1` + `::error::`) se a resposta não for 200.
+
+**Env vars/secrets necessários** (mesmo valor de `CRON_SECRET` nos dois lugares):
+- Vercel (Project Settings → Environment Variables): `CRON_SECRET`
+- GitHub (repo Settings → Secrets and variables → Actions): `CRON_SECRET` e `PRODUCTION_URL` (a URL base de produção, sem `/api/collect` no final)
+
+`process.env.CRON_SECRET` ausente faz a rota sempre retornar 401 (fail closed) — não confundir com bug se esquecer de configurar a env var no Vercel antes do primeiro deploy pós-mudança.
 
 ## Setup do Supabase
 
