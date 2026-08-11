@@ -1964,7 +1964,7 @@ export default function Home() {
           <button key={t.id} onClick={() => setTab(t.id)}
             style={{
               display: 'flex', alignItems: 'center', gap: 7,
-              padding: '8px 20px', borderRadius: 2, border: 'none', fontSize: 13, fontWeight: 500, cursor: 'pointer',
+              padding: '12px 20px', borderRadius: 2, border: 'none', fontSize: 13, fontWeight: 500, cursor: 'pointer',
               background: tab === t.id ? 'var(--accent)' : 'transparent',
               color: tab === t.id ? '#fff' : 'var(--text-muted)',
             }}>
