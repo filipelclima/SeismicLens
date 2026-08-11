@@ -106,12 +106,12 @@ export function ConnectButton() {
   if (address) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <div style={{ background: '#1e0d2b', border: '1px solid #8B5CF6', borderRadius: 8, padding: '6px 12px', fontSize: 12, color: '#A78BFA', display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ background: 'var(--accent-bg)', border: '1px solid var(--accent)', borderRadius: 2, padding: '6px 12px', fontSize: 12, color: 'var(--series-shielded)', display: 'flex', alignItems: 'center', gap: 6 }}>
           <WalletIcon type={walletType} />
           <span style={{ fontFamily: 'monospace' }}>{address.slice(0, 6)}...{address.slice(-4)}</span>
         </div>
         <button onClick={disconnect}
-          style={{ fontSize: 12, padding: '6px 10px', borderRadius: 8, border: '1px solid #1e1e2e', background: 'transparent', color: '#64748b', cursor: 'pointer' }}>
+          style={{ fontSize: 12, padding: '6px 10px', borderRadius: 2, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-muted)', cursor: 'pointer' }}>
           ✕
         </button>
       </div>
@@ -121,13 +121,13 @@ export function ConnectButton() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
       <button onClick={connect} disabled={connecting}
-        style={{ background: '#8B5CF6', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: 500, cursor: connecting ? 'not-allowed' : 'pointer', opacity: connecting ? 0.7 : 1, display: 'flex', alignItems: 'center', gap: 6 }}>
+        style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 2, padding: '8px 16px', fontSize: 13, fontWeight: 500, cursor: connecting ? 'not-allowed' : 'pointer', opacity: connecting ? 0.7 : 1, display: 'flex', alignItems: 'center', gap: 6 }}>
         {connecting ? '⏳ Connecting...' : '🔗 Connect Wallet'}
       </button>
       {/* Error renders alongside the button, not instead of it — a failed
           eth_requestAccounts (user rejected the popup, wallet locked, etc.)
           must never leave the header permanently stuck with no way to retry. */}
-      {error && <div style={{ fontSize: 11, color: '#ef4444' }}>{error}</div>}
+      {error && <div style={{ fontSize: 11, color: 'var(--status-critical)' }}>{error}</div>}
     </div>
   )
 }
@@ -234,9 +234,9 @@ export function DevDashboardTab() {
     return (
       <div style={{ textAlign: 'center', padding: '4rem 2rem' }}>
         <div style={{ fontSize: 48, marginBottom: 16 }}>🦊</div>
-        <div style={{ fontSize: 18, fontWeight: 600, color: '#f1f5f9', marginBottom: 8 }}>No wallet detected</div>
-        <div style={{ fontSize: 13, color: '#64748b', marginBottom: 24 }}>
-          Install <a href="https://metamask.io" target="_blank" rel="noopener noreferrer" style={{ color: '#A78BFA' }}>MetaMask</a> or <a href="https://rabby.io" target="_blank" rel="noopener noreferrer" style={{ color: '#A78BFA' }}>Rabby Wallet</a> to use this feature.
+        <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>No wallet detected</div>
+        <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 24 }}>
+          Install <a href="https://metamask.io" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--series-shielded)' }}>MetaMask</a> or <a href="https://rabby.io" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--series-shielded)' }}>Rabby Wallet</a> to use this feature.
         </div>
       </div>
     )
@@ -246,8 +246,8 @@ export function DevDashboardTab() {
     return (
       <div style={{ textAlign: 'center', padding: '4rem 2rem' }}>
         <div style={{ fontSize: 48, marginBottom: 16 }}>🔗</div>
-        <div style={{ fontSize: 18, fontWeight: 600, color: '#f1f5f9', marginBottom: 8 }}>Connect your wallet</div>
-        <div style={{ fontSize: 13, color: '#64748b', marginBottom: 24, maxWidth: 400, margin: '0 auto 24px' }}>
+        <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>Connect your wallet</div>
+        <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 24, maxWidth: 400, margin: '0 auto 24px' }}>
           Connect your wallet to see your personal developer dashboard — transactions, contracts deployed, gas spent and more on Seismic testnet.
         </div>
         <ConnectButton />
@@ -259,59 +259,59 @@ export function DevDashboardTab() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
         <div>
-          <div style={{ fontSize: 16, fontWeight: 600, color: '#f1f5f9' }}>Developer Dashboard</div>
-          <div style={{ fontSize: 12, color: '#64748b', marginTop: 2, fontFamily: 'monospace' }}>{address}</div>
+          <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-primary)' }}>Developer Dashboard</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2, fontFamily: 'monospace' }}>{address}</div>
         </div>
         <button onClick={() => address && loadDevData(address)}
-          style={{ fontSize: 12, padding: '6px 14px', borderRadius: 8, border: '1px solid #1e1e2e', background: 'transparent', color: '#94a3b8', cursor: 'pointer' }}>
+          style={{ fontSize: 12, padding: '6px 14px', borderRadius: 2, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer' }}>
           ↻ Refresh
         </button>
       </div>
 
       {loading ? (
-        <div style={{ fontSize: 13, color: '#475569', textAlign: 'center', padding: '3rem' }}>
+        <div style={{ fontSize: 13, color: 'var(--text-muted)', textAlign: 'center', padding: '3rem' }}>
           Scanning Seismic testnet for your activity...
         </div>
       ) : stats ? (
         <>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, marginBottom: '1.5rem' }}>
-            <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1rem 1.25rem' }}>
-              <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>ETH Balance</div>
-              <div style={{ fontSize: 24, fontWeight: 600, color: '#8B5CF6' }}>{stats.balance}</div>
-              <div style={{ fontSize: 12, color: '#475569', marginTop: 3 }}>ETH</div>
+            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, padding: '1rem 1.25rem' }}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>ETH Balance</div>
+              <div style={{ fontSize: 24, fontWeight: 600, color: 'var(--accent)' }}>{stats.balance}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>ETH</div>
             </div>
-            <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1rem 1.25rem' }}>
-              <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Transactions</div>
-              <div style={{ fontSize: 24, fontWeight: 600, color: '#38BDF8' }}>{stats.txCount}</div>
-              <div style={{ fontSize: 12, color: '#475569', marginTop: 3 }}>last 500 blocks</div>
+            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, padding: '1rem 1.25rem' }}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Transactions</div>
+              <div style={{ fontSize: 24, fontWeight: 600, color: 'var(--series-tx)' }}>{stats.txCount}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>last 500 blocks</div>
             </div>
-            <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1rem 1.25rem' }}>
-              <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Shielded Txs</div>
-              <div style={{ fontSize: 24, fontWeight: 600, color: '#F59E0B' }}>{stats.shieldedTxCount}</div>
-              <div style={{ fontSize: 12, color: '#475569', marginTop: 3 }}>type 0x4A</div>
+            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, padding: '1rem 1.25rem' }}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Shielded Txs</div>
+              <div style={{ fontSize: 24, fontWeight: 600, color: 'var(--status-warning)' }}>{stats.shieldedTxCount}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>type 0x4A</div>
             </div>
-            <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1rem 1.25rem' }}>
-              <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Contracts Deployed</div>
-              <div style={{ fontSize: 24, fontWeight: 600, color: '#A78BFA' }}>{stats.contractsDeployed}</div>
-              <div style={{ fontSize: 12, color: '#475569', marginTop: 3 }}>on Seismic testnet</div>
+            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, padding: '1rem 1.25rem' }}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Contracts Deployed</div>
+              <div style={{ fontSize: 24, fontWeight: 600, color: 'var(--series-shielded)' }}>{stats.contractsDeployed}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>on Seismic testnet</div>
             </div>
-            <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1rem 1.25rem' }}>
-              <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Gas Spent</div>
-              <div style={{ fontSize: 24, fontWeight: 600, color: '#EF9F27' }}>{stats.totalGasETH.toFixed(8)}</div>
-              <div style={{ fontSize: 12, color: '#475569', marginTop: 3 }}>ETH total</div>
+            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, padding: '1rem 1.25rem' }}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Gas Spent</div>
+              <div style={{ fontSize: 24, fontWeight: 600, color: 'var(--series-gas)' }}>{stats.totalGasETH.toFixed(8)}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>ETH total</div>
             </div>
           </div>
 
-          <div style={{ background: '#13131a', border: '1px solid #1e1e2e', borderRadius: 12, padding: '1.25rem' }}>
-            <div style={{ fontSize: 12, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '1rem' }}>Recent transactions</div>
+          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, padding: '1.25rem' }}>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '1rem' }}>Recent transactions</div>
             {stats.txs.length === 0 ? (
-              <div style={{ fontSize: 13, color: '#475569', textAlign: 'center', padding: '2rem' }}>
+              <div style={{ fontSize: 13, color: 'var(--text-muted)', textAlign: 'center', padding: '2rem' }}>
                 No transactions found in the last 500 blocks.
               </div>
             ) : (
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead>
-                  <tr style={{ color: '#475569', fontSize: 11, textTransform: 'uppercase' }}>
+                  <tr style={{ color: 'var(--text-muted)', fontSize: 11, textTransform: 'uppercase' }}>
                     <th style={{ textAlign: 'left', paddingBottom: 8, fontWeight: 500 }}>Hash</th>
                     <th style={{ textAlign: 'left', paddingBottom: 8, fontWeight: 500 }}>Type</th>
                     <th style={{ textAlign: 'left', paddingBottom: 8, fontWeight: 500 }}>Age</th>
@@ -320,16 +320,16 @@ export function DevDashboardTab() {
                 </thead>
                 <tbody>
                   {stats.txs.map(tx => (
-                    <tr key={tx.hash} style={{ borderTop: '1px solid #1e1e2e' }}>
-                      <td style={{ padding: '8px 0', color: '#38BDF8', fontFamily: 'monospace' }}>
+                    <tr key={tx.hash} style={{ borderTop: '1px solid var(--border)' }}>
+                      <td style={{ padding: '8px 0', color: 'var(--series-tx)', fontFamily: 'monospace' }}>
                         <a href={`${EXPLORER_URL}/tx/${tx.hash}`} target="_blank" rel="noopener noreferrer"
-                          style={{ color: '#38BDF8', textDecoration: 'none' }}>
+                          style={{ color: 'var(--series-tx)', textDecoration: 'none' }}>
                           {tx.hash.slice(0, 8)}...{tx.hash.slice(-6)}
                         </a>
                       </td>
-                      <td style={{ padding: '8px 0', color: tx.shielded ? '#F59E0B' : '#94a3b8' }}>{tx.type}</td>
-                      <td style={{ padding: '8px 0', color: '#64748b' }}>{timeAgo(tx.timestamp)}</td>
-                      <td style={{ padding: '8px 0', textAlign: 'right', color: '#EF9F27', fontFamily: 'monospace' }}>
+                      <td style={{ padding: '8px 0', color: tx.shielded ? 'var(--status-warning)' : 'var(--text-secondary)' }}>{tx.type}</td>
+                      <td style={{ padding: '8px 0', color: 'var(--text-muted)' }}>{timeAgo(tx.timestamp)}</td>
+                      <td style={{ padding: '8px 0', textAlign: 'right', color: 'var(--series-gas)', fontFamily: 'monospace' }}>
                         {tx.gasCost.toFixed(10)}
                       </td>
                     </tr>
@@ -340,7 +340,7 @@ export function DevDashboardTab() {
           </div>
         </>
       ) : (
-        <div style={{ fontSize: 13, color: '#ef4444', textAlign: 'center', padding: '2rem' }}>
+        <div style={{ fontSize: 13, color: 'var(--status-critical)', textAlign: 'center', padding: '2rem' }}>
           Failed to load data. Please try refreshing.
         </div>
       )}

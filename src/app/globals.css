@@ -3,4 +3,62 @@
 @tailwind utilities;
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { background: #0a0a0f; color: #e2e8f0; font-family: 'Inter', sans-serif; }
+
+:root {
+  /* Surfaces — page is the darker of the two so cards read as raised */
+  --bg-page: #fcfcfb;
+  --bg-card: #ffffff;
+  --bg-divider: #ededea;
+
+  /* Borders */
+  --border: #ededea;
+  --border-strong: #c9c7bf;
+
+  /* Text */
+  --text-primary: #161616;
+  --text-secondary: #282826;
+  --text-muted: #5c5c5c;
+
+  /* Brand accent — extracted from seismic.systems (nav/footer link color) */
+  --accent: #825a6d;
+  --accent-deep: #523542;
+  --accent-bg: #f5eef1;
+  --accent-border: rgba(130, 90, 109, 0.35);
+  --accent-border-faint: rgba(130, 90, 109, 0.15);
+
+  /* Ink — seismic.systems' own filled-button background */
+  --ink: #131014;
+
+  /* Status — reserved, never reused as a chart series color */
+  --status-good: #0b7534;
+  --status-good-bg: #e8f5ec;
+  --status-good-border: rgba(11, 117, 52, 0.35);
+  --status-warning: #92600a;
+  --status-warning-bg: #fbf1e0;
+  --status-warning-border: rgba(146, 96, 10, 0.35);
+  --status-serious: #b8541f;
+  --status-serious-bg: #fbe9de;
+  --status-serious-border: rgba(184, 84, 31, 0.35);
+  --status-critical: #c22e2e;
+  --status-critical-bg: #fbeaea;
+  --status-critical-border: rgba(194, 46, 46, 0.35);
+
+  /* Chart series — validated for colorblind separation + contrast on white,
+     and checked pairwise against --accent so no series color reads as the
+     brand accent (see CLAUDE.md for the validation notes). */
+  --series-block-time: #159c82;
+  --series-gas: #c08a2e;
+  --series-tx: #0d6bae;
+  --series-shielded: #5825ba;
+
+  /* AI-report feature accent — kept distinct from the main brand accent */
+  --ai-accent: #4f46e5;
+  --ai-accent-strong: #4338ca;
+  --ai-accent-bg: #eeedfb;
+
+  --series-tx-bg: #e9f2fa;
+
+  --mono: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
+}
+
+body { background: var(--bg-page); color: var(--text-primary); font-family: 'Inter', sans-serif; }
