@@ -309,6 +309,7 @@ export function DevDashboardTab() {
                 No transactions found in the last 500 blocks.
               </div>
             ) : (
+              <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead>
                   <tr style={{ color: 'var(--text-muted)', fontSize: 11, textTransform: 'uppercase' }}>
@@ -327,7 +328,7 @@ export function DevDashboardTab() {
                           {tx.hash.slice(0, 8)}...{tx.hash.slice(-6)}
                         </a>
                       </td>
-                      <td style={{ padding: '8px 0', color: tx.shielded ? 'var(--status-warning)' : 'var(--text-secondary)' }}>{tx.type}</td>
+                      <td style={{ padding: '8px 0', color: tx.shielded ? 'var(--series-shielded)' : 'var(--text-secondary)' }}>{tx.type}</td>
                       <td style={{ padding: '8px 0', color: 'var(--text-muted)' }}>{timeAgo(tx.timestamp)}</td>
                       <td style={{ padding: '8px 0', textAlign: 'right', color: 'var(--series-gas)', fontFamily: 'monospace' }}>
                         {tx.gasCost.toFixed(10)}
@@ -336,6 +337,7 @@ export function DevDashboardTab() {
                   ))}
                 </tbody>
               </table>
+              </div>
             )}
           </div>
         </>

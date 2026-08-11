@@ -201,15 +201,15 @@ function DashboardTab() {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, marginBottom: '1.5rem' }}>
-        <MetricCard label="Latest block" value={data.latestBlock > 0 ? data.latestBlock.toLocaleString() : '—'} unit="block number" />
+        <MetricCard label="Latest block" value={data.latestBlock > 0 ? data.latestBlock.toLocaleString() : '—'} unit="block number" color="var(--text-primary)" />
         <MetricCard label="Avg block time" value={data.avgBlockTime > 0 ? `${data.avgBlockTime}s` : '—'} unit="last 10 blocks" color="var(--series-tx)" />
         <MetricCard label="Gas price" value={data.gasPrice !== '0' ? `${data.gasPrice}` : '—'} unit="gwei · paid in ETH" color="var(--status-warning)" />
         <MetricCard label="RPC latency" value={data.rpcLatency > 0 ? `${data.rpcLatency}ms` : '—'} unit="response time" color="var(--series-shielded)" />
-        <MetricCard label="Tx (last block)" value={data.blocks.length > 0 ? data.blocks[data.blocks.length - 1].txCount : '—'} unit="transactions" color="var(--accent)" />
+        <MetricCard label="Tx (last block)" value={data.blocks.length > 0 ? data.blocks[data.blocks.length - 1].txCount : '—'} unit="transactions" color="var(--text-primary)" />
         <MetricCard label="Chain ID" value={data.chainId > 0 ? data.chainId : '—'} unit="Seismic Testnet" color="var(--text-muted)" />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: '1.5rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 12, marginBottom: '1.5rem' }}>
         <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, padding: '1rem 1.25rem' }}>
           <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Block time (s)</div>
           <ResponsiveContainer width="100%" height={160}>
@@ -237,7 +237,7 @@ function DashboardTab() {
       </div>
 
       {/* Gas History + Shielded Activity History */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: '1.5rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 12, marginBottom: '1.5rem' }}>
         <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, padding: '1rem 1.25rem' }}>
           <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Gas price history</div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10 }}>Average gwei per day — from Supabase snapshots</div>
@@ -280,6 +280,7 @@ function DashboardTab() {
         {data.blocks.length === 0 ? (
           <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Loading blocks...</div>
         ) : (
+          <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
             <thead>
               <tr style={{ color: 'var(--text-muted)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
@@ -294,12 +295,13 @@ function DashboardTab() {
                   <td style={{ padding: '9px 0', color: 'var(--accent)', fontWeight: 500 }}>#{b.number.toLocaleString()}</td>
                   <td style={{ padding: '9px 0', color: 'var(--text-muted)' }}>{timeAgo(b.timestamp)}</td>
                   <td style={{ padding: '9px 0', textAlign: 'right' }}>
-                    <span style={{ background: 'var(--series-tx-bg)', color: 'var(--series-tx)', fontSize: 11, padding: '2px 8px', borderRadius: 2 }}>{b.txCount} txs</span>
+                    <span style={{ background: 'var(--bg-divider)', color: 'var(--text-secondary)', fontSize: 11, padding: '2px 8px', borderRadius: 2 }}>{b.txCount} txs</span>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </>
@@ -460,7 +462,7 @@ function ReportsTab() {
       ) : days.length === 0 ? (
         <div style={{ fontSize: 13, color: 'var(--text-muted)', textAlign: 'center', padding: '2rem' }}>No reports found for this period.</div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '280px minmax(0, 1fr)', gap: 12 }}>
           {/* Day list */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {days.map(day => {
@@ -514,7 +516,7 @@ function ReportsTab() {
                     </div>
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: '1.25rem' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8, marginBottom: '1.25rem' }}>
                     <MetricCard label="Avg block time" value={`${avgBlockTime.toFixed(3)}s`} unit="seconds" color="var(--accent)" />
                     <MetricCard label="Avg gas" value={`${avgGas.toFixed(4)}`} unit="gwei" color="var(--status-warning)" />
                     <MetricCard label="Avg latency" value={`${Math.round(avgLatency)}ms`} unit="RPC response" color="var(--series-shielded)" />
@@ -796,7 +798,7 @@ function TransportStatusCard() {
       {loading ? (
         <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>Checking HTTPS + WSS transports...</div>
       ) : status ? (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 12 }}>
           {([
             { label: 'HTTPS (JSON-RPC)', url: RPC_HTTP, s: status.http },
             { label: 'WSS (subscriptions)', url: RPC_WSS, s: status.ws },
@@ -1094,7 +1096,7 @@ function GasEstimator() {
         ⛽ Gas Estimator — Cost in ETH
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: '1rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 12, marginBottom: '1rem' }}>
         <div>
           <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>Select operation</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -1211,7 +1213,7 @@ function CompareTab() {
     return (
       <div style={{ background: 'var(--bg-page)', borderRadius: 4, padding: '1rem', border: '1px solid var(--border)' }}>
         <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>{label}</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: 8, alignItems: 'center' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto minmax(0, 1fr)', gap: 8, alignItems: 'center' }}>
           <div>
             <div style={{ fontSize: 20, fontWeight: 600, color: 'var(--text-primary)' }}>{a.toFixed(3)}</div>
             <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Period A</div>
@@ -1242,7 +1244,7 @@ function CompareTab() {
   return (
     <div>
       <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, padding: '1.25rem', marginBottom: '1.25rem' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 16 }}>
           <div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>Period A</div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -1287,7 +1289,7 @@ function CompareTab() {
                 <ExportButtons data={dataB} filenameBase={`seismiclens-compare-B-${periodB.from}`} />
               </div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: '1.25rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 10, marginBottom: '1.25rem' }}>
               <CompareMetric label="Avg block time" a={aBlockTime} b={bBlockTime} unit="seconds — lower is better" />
               <CompareMetric label="Avg gas price" a={aGas} b={bGas} unit="gwei — lower is better" />
               <CompareMetric label="Avg RPC latency" a={aLatency} b={bLatency} unit="milliseconds — lower is better" />
@@ -1351,7 +1353,7 @@ function AnomaliesTab() {
           <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>The Seismic testnet has been running smoothly. All recorded snapshots are within normal parameters.</div>
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '300px minmax(0, 1fr)', gap: 12 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {anomalies.map(a => {
               const isCritical = (a as any).anomaly_severity === 'critical'
@@ -1393,7 +1395,7 @@ function AnomaliesTab() {
                     </span>
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: '1.25rem' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 8, marginBottom: '1.25rem' }}>
                     <MetricCard label="Health Score" value={score} unit="at detection" color={color} />
                     <MetricCard label="Block time" value={`${selected.block_time_avg}s`} unit="seconds" color="var(--series-tx)" />
                     <MetricCard label="RPC latency" value={`${selected.rpc_latency}ms`} unit="milliseconds" color="var(--series-shielded)" />
@@ -1796,6 +1798,7 @@ function ShieldedActivityTab() {
                 </div>
               </div>
             ) : (
+              <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead>
                   <tr style={{ color: 'var(--text-muted)', fontSize: 11, textTransform: 'uppercase' }}>
@@ -1821,6 +1824,7 @@ function ShieldedActivityTab() {
                   ))}
                 </tbody>
               </table>
+              </div>
             )}
           </div>
 
@@ -1856,6 +1860,38 @@ function scoreLabel(score: number | null) {
   return { label: 'ANOMALY', color: 'var(--status-critical)', bg: 'var(--status-critical-bg)', border: 'var(--status-critical-border)' }
 }
 
+// ─── TAB ICONS ────────────────────────────────────────────────────
+// Monochrome, inherit currentColor from the tab button (muted when
+// inactive, white when active on the accent-filled pill) — replaces the
+// emoji set, which introduced colors outside the palette and read as
+// rounded/soft against the site's angular, sharp-cornered language.
+const iconProps = { width: 15, height: 15, viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.4 } as const
+
+function IconDashboard() {
+  return <svg {...iconProps}><path d="M2 13V9M8 13V3M14 13V6" strokeLinecap="square" /></svg>
+}
+function IconReports() {
+  return <svg {...iconProps} strokeWidth={1.3}><path d="M3 1.5h7l3 3v10h-10z" strokeLinejoin="miter" /><path d="M6 8h5M6 11h5" strokeLinecap="square" /></svg>
+}
+function IconCompare() {
+  return <svg {...iconProps} strokeLinecap="square" strokeLinejoin="miter"><path d="M1 5h10M8 2l3 3-3 3" /><path d="M15 11H5M8 8l-3 3 3 3" /></svg>
+}
+function IconAnomalies() {
+  return <svg {...iconProps} strokeLinejoin="miter"><path d="M8 2 15 14H1Z" /><path d="M8 6.5v3" strokeLinecap="square" /><circle cx="8" cy="11.5" r="0.75" fill="currentColor" stroke="none" /></svg>
+}
+function IconNetworkStatus() {
+  return <svg {...iconProps} strokeLinecap="square" strokeLinejoin="miter"><path d="M1 8h3l2-5 3 10 2-5h4" /></svg>
+}
+function IconDev() {
+  return <svg {...iconProps} strokeLinecap="square" strokeLinejoin="miter"><path d="M5 3 1 8l4 5M11 3l4 5-4 5" /></svg>
+}
+function IconNetworks() {
+  return <svg {...iconProps} strokeWidth={1.3}><path d="M4 4 12 4M4 4 8 13M12 4 8 13" strokeLinecap="square" /><rect x="2" y="2" width="4" height="4" /><rect x="10" y="2" width="4" height="4" /><rect x="6" y="11" width="4" height="4" /></svg>
+}
+function IconShielded() {
+  return <svg width={15} height={15} viewBox="0 0 16 16"><path fillRule="evenodd" d="M8 1 14.5 4.75 14.5 11.25 8 15 1.5 11.25 1.5 4.75Z M8 4 11.5 6 11.5 10 8 12 4.5 10 4.5 6Z" fill="currentColor" /></svg>
+}
+
 // ─── MAIN APP ─────────────────────────────────────────────────────
 export default function Home() {
   const [tab, setTab] = useState<'dashboard' | 'reports' | 'compare' | 'anomalies' | 'status' | 'dev' | 'networks' | 'shielded'>('dashboard')
@@ -1875,14 +1911,14 @@ export default function Home() {
   const isAnomaly = score !== null && score < 50
 
   const tabs = [
-    { id: 'dashboard', label: '📊 Dashboard' },
-    { id: 'reports', label: '📋 Reports' },
-    { id: 'compare', label: '⚖️ Compare' },
-    { id: 'anomalies', label: '⚠️ Anomalies' },
-    { id: 'status', label: '⚡ Network Status' },
-    { id: 'dev', label: '👨‍💻 Dev Dashboard' },
-    { id: 'networks', label: '🌐 Networks' },
-    { id: 'shielded', label: '🔒 Shielded Activity' },
+    { id: 'dashboard', label: 'Dashboard', icon: <IconDashboard /> },
+    { id: 'reports', label: 'Reports', icon: <IconReports /> },
+    { id: 'compare', label: 'Compare', icon: <IconCompare /> },
+    { id: 'anomalies', label: 'Anomalies', icon: <IconAnomalies /> },
+    { id: 'status', label: 'Network Status', icon: <IconNetworkStatus /> },
+    { id: 'dev', label: 'Dev Dashboard', icon: <IconDev /> },
+    { id: 'networks', label: 'Networks', icon: <IconNetworks /> },
+    { id: 'shielded', label: 'Shielded Activity', icon: <IconShielded /> },
   ] as const
 
   return (
@@ -1897,8 +1933,8 @@ export default function Home() {
       )}
 
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px 16px', marginBottom: '1.5rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px 16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <svg viewBox="0 0 48 48" width="32" height="32" aria-label="SeismicLens logo" role="img">
               <path fillRule="evenodd" d="M24 3 44 14.5 44 33.5 24 45 4 33.5 4 14.5Z M24 12 37 19.5 37 28.5 24 36 11 28.5 11 19.5Z" fill="var(--ink)" />
@@ -1907,12 +1943,12 @@ export default function Home() {
             <span style={{ fontSize: 24, fontWeight: 700, color: 'var(--text-primary)' }}>SeismicLens</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', boxShadow: '0 0 8px var(--accent)', animation: 'pulse 2s infinite' }} />
+            <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', boxShadow: '0 0 8px var(--accent)', animation: 'pulse 2s infinite', flexShrink: 0 }} />
             <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>Seismic Testnet · Network Health Monitor</p>
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
           <ConnectButton />
           <div style={{ background: bg, border: `1px solid ${border}`, borderRadius: 4, padding: '10px 18px', textAlign: 'center', minWidth: 110 }}>
             <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Health Score</div>
@@ -1927,10 +1963,12 @@ export default function Home() {
         {tabs.map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
             style={{
+              display: 'flex', alignItems: 'center', gap: 7,
               padding: '8px 20px', borderRadius: 2, border: 'none', fontSize: 13, fontWeight: 500, cursor: 'pointer',
               background: tab === t.id ? 'var(--accent)' : 'transparent',
               color: tab === t.id ? '#fff' : 'var(--text-muted)',
             }}>
+            {t.icon}
             {t.label}
           </button>
         ))}
