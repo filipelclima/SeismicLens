@@ -719,7 +719,6 @@ interface TxStats {
   success: number
   failed: number
   successRate: number
-  avgGasUsed: number
   blocksScanned: number
 }
 
@@ -873,13 +872,9 @@ function NetworkStatusTab() {
       )
 
       let total = 0
-      let totalGas = 0
       for (const block of blocks) {
         if (!block?.transactions) continue
-        for (const tx of block.transactions) {
-          total++
-          totalGas += hexToNum(tx.gas ?? '0x0')
-        }
+        total += block.transactions.length
       }
 
       // Real success rate from a sample of actual receipts.
@@ -912,7 +907,6 @@ function NetworkStatusTab() {
         success: Math.round(total * successRate / 100),
         failed: Math.round(total * (100 - successRate) / 100),
         successRate,
-        avgGasUsed: total > 0 ? Math.round(totalGas / total) : 0,
         blocksScanned: scanCount,
       })
     } catch {
