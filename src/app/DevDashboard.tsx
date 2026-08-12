@@ -28,8 +28,8 @@ interface DevTx {
   hash: string
   block: number
   timestamp: number
-  gasUsed: number
-  gasCost: number
+  gasUsed: number | null // null when the receipt was unavailable — never
+  gasCost: number | null // silently fall back to the tx's gas limit for this
   type: string
   shielded: boolean
   to: string
@@ -38,6 +38,7 @@ interface DevTx {
 interface DevStats {
   txCount: number
   totalGasETH: number
+  unknownGasCount: number
   contractsDeployed: number
   shieldedTxCount: number
   balance: string
@@ -182,39 +183,58 @@ export function DevDashboardTab() {
         )
       )
 
-      const txs: DevTx[] = []
-      let contractsDeployed = 0
-      let totalGas = 0
-      let shieldedTxCount = 0
-
+      const matched: { tx: any; block: any }[] = []
       for (const block of blocks) {
         if (!block?.transactions) continue
         for (const tx of block.transactions) {
           if (tx.from?.toLowerCase() !== addr.toLowerCase()) continue
-          const gasUsed = hexToNum(tx.gas ?? '0x0')
-          const gasPrice = hexToNum(tx.gasPrice ?? '0x0') / 1e9
-          const gasCost = (gasUsed * gasPrice) / 1e9
-          totalGas += gasCost
-          const isContract = !tx.to
-          const shielded = tx.type?.toLowerCase() === SHIELDED_TX_TYPE
-          if (isContract) contractsDeployed++
-          if (shielded) shieldedTxCount++
-          txs.push({
-            hash: tx.hash,
-            block: hexToNum(block.number),
-            timestamp: seismicTimestampToSeconds(block.timestamp),
-            gasUsed,
-            gasCost,
-            type: isContract ? '📄 Contract Deploy' : shielded ? '🔒 Shielded Tx' : '💸 Transfer',
-            shielded,
-            to: tx.to ?? 'Contract Creation',
-          })
+          matched.push({ tx, block })
         }
       }
+
+      const receipts = await Promise.all(
+        matched.map(({ tx }) =>
+          rpcCall('eth_getTransactionReceipt', [tx.hash]).catch(() => null)
+        )
+      )
+
+      const txs: DevTx[] = []
+      let contractsDeployed = 0
+      let totalGas = 0
+      let unknownGasCount = 0
+      let shieldedTxCount = 0
+
+      matched.forEach(({ tx, block }, i) => {
+        const receipt = receipts[i]
+        const gasUsedHex = receipt?.gasUsed
+        const gasUsed = gasUsedHex !== undefined && gasUsedHex !== null ? hexToNum(gasUsedHex) : null
+        const gasPrice = hexToNum(tx.gasPrice ?? '0x0') / 1e9
+        const gasCost = gasUsed !== null ? (gasUsed * gasPrice) / 1e9 : null
+        if (gasCost !== null) {
+          totalGas += gasCost
+        } else {
+          unknownGasCount++
+        }
+        const isContract = !tx.to
+        const shielded = tx.type?.toLowerCase() === SHIELDED_TX_TYPE
+        if (isContract) contractsDeployed++
+        if (shielded) shieldedTxCount++
+        txs.push({
+          hash: tx.hash,
+          block: hexToNum(block.number),
+          timestamp: seismicTimestampToSeconds(block.timestamp),
+          gasUsed,
+          gasCost,
+          type: isContract ? '📄 Contract Deploy' : shielded ? '🔒 Shielded Tx' : '💸 Transfer',
+          shielded,
+          to: tx.to ?? 'Contract Creation',
+        })
+      })
 
       setStats({
         txCount: txs.length,
         totalGasETH: totalGas,
+        unknownGasCount,
         contractsDeployed,
         shieldedTxCount,
         balance,
@@ -298,7 +318,9 @@ export function DevDashboardTab() {
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, padding: '1rem 1.25rem' }}>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Gas Spent</div>
               <div style={{ fontSize: 24, fontWeight: 600, color: 'var(--series-gas)' }}>{stats.totalGasETH.toFixed(8)}</div>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>ETH total</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>
+                ETH total{stats.unknownGasCount > 0 ? ` · ${stats.unknownGasCount} tx w/o receipt excluded` : ''}
+              </div>
             </div>
           </div>
 
@@ -330,8 +352,8 @@ export function DevDashboardTab() {
                       </td>
                       <td style={{ padding: '8px 0', color: tx.shielded ? 'var(--series-shielded)' : 'var(--text-secondary)' }}>{tx.type}</td>
                       <td style={{ padding: '8px 0', color: 'var(--text-muted)' }}>{timeAgo(tx.timestamp)}</td>
-                      <td style={{ padding: '8px 0', textAlign: 'right', color: 'var(--series-gas)', fontFamily: 'monospace' }}>
-                        {tx.gasCost.toFixed(10)}
+                      <td style={{ padding: '8px 0', textAlign: 'right', color: tx.gasCost !== null ? 'var(--series-gas)' : 'var(--text-muted)', fontFamily: 'monospace' }}>
+                        {tx.gasCost !== null ? tx.gasCost.toFixed(10) : 'no receipt'}
                       </td>
                     </tr>
                   ))}
