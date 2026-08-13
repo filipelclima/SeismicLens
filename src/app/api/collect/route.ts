@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { NextResponse } from 'next/server'
-import { RPC_HTTP, SHIELDED_TX_TYPE, seismicTimestampToSeconds } from '@/lib/chain'
+import { RPC_HTTP, SHIELDED_TX_TYPE, SUSDC_CONTRACT, SRC20_TRANSFER_TOPIC, GET_LOGS_MAX_RANGE, seismicTimestampToSeconds } from '@/lib/chain'
+import { dedupeSrc20Logs } from '@/lib/src20'
 
 // CRITICAL: this route must never be cached — every invocation must run the
 // full collection pipeline and insert a new snapshot. Without force-dynamic,
@@ -105,6 +106,49 @@ async function sampleRpcLatencies(n: number): Promise<number[]> {
     .map(r => r.value)
 }
 
+// SRC20 (SUSDC value-hidden transfer) delta scan — independent of the 0x4A
+// block-by-block scan below, and much cheaper: eth_getLogs is indexed, so a
+// wide range costs one call per GET_LOGS_MAX_RANGE-sized chunk instead of one
+// call per block. To avoid double-counting the same transfer across runs, we
+// scan the DELTA since the previous snapshot's block_number (reused directly
+// — no separate cursor column needed, since the SRC20 scan's toBlock is the
+// same `latest` value that gets written to block_number for this row too),
+// not a fixed rolling window. Capped at SRC20_COLLECT_MAX_CHUNKS chunks so a
+// long outage (missed cron runs, Supabase down) can't make a single
+// invocation scan millions of blocks and blow past Vercel's function timeout
+// — if the real delta is bigger than the cap, we only scan the most recent
+// portion and alert about the gap, same pattern as STALE_GAP_HOURS below.
+const SRC20_COLLECT_MAX_CHUNKS = 20 // 20 * 100_000 = 2,000,000 blocks per run, ceiling
+
+async function scanSrc20Delta(fromBlock: number, toBlock: number): Promise<{ count: number; truncated: boolean }> {
+  const fullRangeChunks = Math.ceil((toBlock - fromBlock + 1) / GET_LOGS_MAX_RANGE)
+  const truncated = fullRangeChunks > SRC20_COLLECT_MAX_CHUNKS
+  const scanFrom = truncated ? toBlock - SRC20_COLLECT_MAX_CHUNKS * GET_LOGS_MAX_RANGE + 1 : fromBlock
+
+  const chunkStarts: number[] = []
+  for (let start = scanFrom; start <= toBlock; start += GET_LOGS_MAX_RANGE) chunkStarts.push(start)
+
+  const logs: any[] = []
+  const CONCURRENCY = 5
+  for (let i = 0; i < chunkStarts.length; i += CONCURRENCY) {
+    const batch = chunkStarts.slice(i, i + CONCURRENCY)
+    const results = await Promise.all(
+      batch.map(start => {
+        const end = Math.min(start + GET_LOGS_MAX_RANGE - 1, toBlock)
+        return rpcCall('eth_getLogs', [{
+          fromBlock: '0x' + start.toString(16),
+          toBlock: '0x' + end.toString(16),
+          address: SUSDC_CONTRACT,
+          topics: [SRC20_TRANSFER_TOPIC],
+        }]).then(r => r.result).catch(() => [])
+      })
+    )
+    for (const r of results) if (Array.isArray(r)) logs.push(...r)
+  }
+
+  return { count: dedupeSrc20Logs(logs).length, truncated }
+}
+
 // Vercel's own Cron Jobs (vercel.json) automatically send
 // `Authorization: Bearer ${CRON_SECRET}` on every trigger — Vercel reads
 // that header value from the project's own CRON_SECRET env var, so once
@@ -128,15 +172,17 @@ export async function GET(req: Request) {
     let gapHours: number | null = null
     let wasAnomaly = false
     let prevSeverity: string | null = null
+    let prevBlockNumber: number | null = null
     try {
       const { data: lastRows } = await supabase
         .from('network_snapshots')
-        .select('created_at, anomaly, anomaly_severity')
+        .select('created_at, anomaly, anomaly_severity, block_number')
         .order('created_at', { ascending: false })
         .limit(1)
       const lastCreatedAt = lastRows?.[0]?.created_at
       wasAnomaly = lastRows?.[0]?.anomaly === true
       prevSeverity = lastRows?.[0]?.anomaly_severity ?? null
+      prevBlockNumber = lastRows?.[0]?.block_number ?? null
       if (lastCreatedAt) {
         gapHours = (Date.now() - new Date(lastCreatedAt).getTime()) / 3_600_000
       }
@@ -161,11 +207,23 @@ export async function GET(req: Request) {
     // 50-block window, full transactions so shielded (type 0x4A) txs can be
     // counted alongside the regular tx total in the same pass.
     const blockNums = Array.from({ length: 50 }, (_, i) => latest - 49 + i)
-    const rawBlocks = await Promise.all(
-      blockNums.map(n =>
-        rpcCall('eth_getBlockByNumber', ['0x' + n.toString(16), true]).then(r => r.result)
-      )
-    )
+
+    // SRC20 delta: from the previous snapshot's block_number (no separate
+    // cursor column — see the comment on scanSrc20Delta above) up to `latest`.
+    // First run ever (no previous row): just the most recent chunk, not deep
+    // history — SRC20 history starts from whenever this ships, not backfilled.
+    const src20FromBlock = prevBlockNumber !== null
+      ? Math.min(prevBlockNumber + 1, latest)
+      : Math.max(0, latest - GET_LOGS_MAX_RANGE + 1)
+
+    const [rawBlocks, src20Result] = await Promise.all([
+      Promise.all(
+        blockNums.map(n =>
+          rpcCall('eth_getBlockByNumber', ['0x' + n.toString(16), true]).then(r => r.result)
+        )
+      ),
+      scanSrc20Delta(src20FromBlock, latest),
+    ])
     const valid = rawBlocks.filter(Boolean)
 
     const times: number[] = []
@@ -194,6 +252,7 @@ export async function GET(req: Request) {
       rpc_latency_p99: latencyP99,
       tx_count: totalTx,
       shielded_tx_count: shieldedTx,
+      src20_transfer_count: src20Result.count,
       chain_id: hexToNum(chainHex),
       health_score: score,
       anomaly: isAnomaly,
@@ -234,8 +293,14 @@ export async function GET(req: Request) {
       )
     }
 
+    if (src20Result.truncated) {
+      await sendDiscordAlert(
+        `⚠️ **SeismicLens — SRC20 scan gap**\nThe delta since the last snapshot's block exceeded ${(SRC20_COLLECT_MAX_CHUNKS * GET_LOGS_MAX_RANGE).toLocaleString()} blocks (likely a collection gap) — only the most recent portion was scanned for SRC20 transfers this run. \`src20_transfer_count\` for this snapshot undercounts; some history in the gap was skipped, not backfilled.`
+      )
+    }
+
     return NextResponse.json(
-      { success: true, block: latest, score, anomaly: isAnomaly, severity, block_time_avg: parseFloat(avgBlockTime.toFixed(3)), rpc_latency_avg: latency, rpc_latency_p50: latencyP50, rpc_latency_p95: latencyP95, rpc_latency_p99: latencyP99, tx_count: totalTx, shielded_tx_count: shieldedTx },
+      { success: true, block: latest, score, anomaly: isAnomaly, severity, block_time_avg: parseFloat(avgBlockTime.toFixed(3)), rpc_latency_avg: latency, rpc_latency_p50: latencyP50, rpc_latency_p95: latencyP95, rpc_latency_p99: latencyP99, tx_count: totalTx, shielded_tx_count: shieldedTx, src20_transfer_count: src20Result.count },
       { headers: { 'Cache-Control': 'no-store' } }
     )
   } catch (e) {

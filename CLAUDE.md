@@ -65,9 +65,13 @@ Dashboard de monitoramento da Seismic blockchain testnet — a privacy-enabled E
 
 `process.env.CRON_SECRET` ausente faz a rota sempre retornar 401 (fail closed) — não confundir com bug se esquecer de configurar a env var no Vercel antes do primeiro deploy pós-mudança.
 
+**SRC20 delta scan** (`scanSrc20Delta` em `route.ts`) roda em paralelo com a varredura de 50 blocos do 0x4A, e escreve `src20_transfer_count` — mecanismo independente, nunca somado com `shielded_tx_count` (mesma regra do resto do app). Usa `eth_getLogs`, então é barato mesmo cobrindo um delta grande. **Cursor: reaproveita `block_number` da snapshot anterior** (`fromBlock = prevBlockNumber + 1`) em vez de uma coluna nova — o `toBlock` do scan já é o mesmo `latest` que vira `block_number` da linha atual, então não há necessidade de rastrear esse estado separadamente. Deduplicado via `dedupeSrc20Logs` (`src/lib/src20.ts`, compartilhado com `page.tsx` — ver nota de double-emission acima). Capado em `SRC20_COLLECT_MAX_CHUNKS = 20` chunks (2M blocos); se o delta desde a última coleta for maior que isso (gap de coleta longo), só a parte mais recente é varrida e um alerta no Discord avisa que houve um buraco não preenchido — sem isso, uma falha longa no cron faria uma única invocação tentar escanear milhões de blocos e estourar o timeout de função serverless da Vercel.
+
 ## Setup do Supabase
 
-Rodar `supabase/schema.sql` uma vez no SQL editor de um projeto Supabase novo antes do primeiro deploy — cria a tabela `network_snapshots` com RLS (leitura pública, escrita só via service key).
+Projeto novo: rodar `supabase/schema.sql` uma vez no SQL editor antes do primeiro deploy — cria a tabela `network_snapshots` com RLS (leitura pública, escrita só via service key).
+
+Projeto existente (schema já aplicado antes de uma mudança de coluna): rodar os arquivos em `supabase/migrations/` em ordem — `schema.sql` não é idempotente para colunas novas, é só a baseline de instalação limpa.
 
 ## Comandos
 

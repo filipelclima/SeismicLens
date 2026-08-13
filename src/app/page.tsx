@@ -2,7 +2,8 @@
 import { useSeismicData } from './useSeismicData'
 import { useState, useEffect } from 'react'
 import { ConnectButton, DevDashboardTab } from './DevDashboard'
-import { RPC_HTTP, RPC_WSS, EXPLORER_URL, CHAIN_ID, SHIELDED_TX_TYPE, SUSDC_CONTRACT, SRC20_TRANSFER_TOPIC, SUSDC_FAUCET_DISPENSER, GET_LOGS_MAX_RANGE, NATIVE_CURRENCY, seismicTimestampToSeconds } from '@/lib/chain'
+import { RPC_HTTP, RPC_WSS, EXPLORER_URL, CHAIN_ID, SHIELDED_TX_TYPE, SUSDC_CONTRACT, SRC20_TRANSFER_TOPIC, GET_LOGS_MAX_RANGE, NATIVE_CURRENCY, seismicTimestampToSeconds } from '@/lib/chain'
+import { dedupeSrc20Logs, parseSrc20Log, Src20LogEvent } from '@/lib/src20'
 import {
   LineChart, Line, BarChart, Bar,
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -1677,21 +1678,12 @@ interface Type4aTx {
   timestamp: number
 }
 
-interface Src20TransferEvent {
-  hash: string
-  block: number
-  from: string
-  to: string
-  timestamp: number
-  isFaucet: boolean
-}
-
 interface Src20Stats {
   count: number
   uniqueSenders: number
   uniqueRecipients: number
   perHour: number
-  recent: Src20TransferEvent[]
+  recent: Src20LogEvent[]
   blocksScanned: number
   // Every SRC20 transfer observed to date comes from the same faucet address —
   // this split exists so the metric can't be misread as organic adoption. If
@@ -1740,32 +1732,16 @@ async function fetchSrc20Transfers(latest: number): Promise<Src20Stats> {
     for (const r of results) if (Array.isArray(r)) logs.push(...r)
   }
 
-  // SUSDC emits this transfer event TWICE per real transfer — confirmed across
-  // every transaction observed (2,146 logs / 1,073 txs, 100% in pairs): the two
-  // logs are byte-identical (same address, topics, data), differing only in
-  // logIndex. Not two real events — dedupe by transactionHash before counting,
-  // or every count below (and the recent-transfers table) is inflated 2x.
-  // See CLAUDE.md's SRC20 double-emission note.
-  const dedupedLogs = Array.from(
-    new Map(logs.map(log => [log.transactionHash, log])).values()
-  )
+  const dedupedLogs = dedupeSrc20Logs(logs)
   const duplicateLogsRemoved = logs.length - dedupedLogs.length
 
   const senders = new Set<string>()
   const recipients = new Set<string>()
-  const events: Src20TransferEvent[] = dedupedLogs.map(log => {
-    const from = '0x' + (log.topics?.[1] ?? '').slice(-40)
-    const to = '0x' + (log.topics?.[2] ?? '').slice(-40)
-    senders.add(from)
-    recipients.add(to)
-    return {
-      hash: log.transactionHash,
-      block: hexToNum(log.blockNumber),
-      from,
-      to,
-      timestamp: seismicTimestampToSeconds(log.blockTimestamp),
-      isFaucet: from.toLowerCase() === SUSDC_FAUCET_DISPENSER,
-    }
+  const events: Src20LogEvent[] = dedupedLogs.map(log => {
+    const event = parseSrc20Log(log)
+    senders.add(event.from)
+    recipients.add(event.to)
+    return event
   })
 
   const now = Math.floor(Date.now() / 1000)

@@ -36,7 +36,7 @@ function corsHeaders() {
   }
 }
 
-function summarise(rs: { block_time_avg: number; gas_price: number; rpc_latency: number; health_score: number; tx_count: number; shielded_tx_count: number; anomaly: boolean }[]) {
+function summarise(rs: { block_time_avg: number; gas_price: number; rpc_latency: number; health_score: number; tx_count: number; shielded_tx_count: number; src20_transfer_count: number; anomaly: boolean }[]) {
   if (!rs.length) return null
   return {
     snapshots: rs.length,
@@ -44,7 +44,10 @@ function summarise(rs: { block_time_avg: number; gas_price: number; rpc_latency:
     avg_gas_price_gwei: parseFloat(avg(rs.map(r => r.gas_price)).toFixed(4)),
     avg_rpc_latency_ms: Math.round(avg(rs.map(r => r.rpc_latency))),
     total_tx_count: rs.reduce((s, r) => s + (r.tx_count ?? 0), 0),
+    // Two independent mechanisms, kept separate — never summed. See
+    // CLAUDE.md's shielded-activity note for why.
     total_shielded_tx_count: rs.reduce((s, r) => s + (r.shielded_tx_count ?? 0), 0),
+    total_src20_transfer_count: rs.reduce((s, r) => s + (r.src20_transfer_count ?? 0), 0),
     avg_health_score: Math.round(avg(rs.map(r => r.health_score))),
     anomaly_count: rs.filter(r => r.anomaly).length,
   }
@@ -62,7 +65,7 @@ export async function GET(req: NextRequest) {
     if (endpoint === 'latest') {
       const { data, error } = await supabase
         .from('network_snapshots')
-        .select('id, created_at, block_number, block_time_avg, gas_price, rpc_latency, tx_count, shielded_tx_count, chain_id, health_score, anomaly, anomaly_severity')
+        .select('id, created_at, block_number, block_time_avg, gas_price, rpc_latency, tx_count, shielded_tx_count, src20_transfer_count, chain_id, health_score, anomaly, anomaly_severity')
         .order('created_at', { ascending: false })
         .limit(1)
         .single()
@@ -90,7 +93,7 @@ export async function GET(req: NextRequest) {
 
       const { data, error } = await supabase
         .from('network_snapshots')
-        .select('id, created_at, block_number, block_time_avg, gas_price, rpc_latency, tx_count, shielded_tx_count, chain_id, health_score, anomaly, anomaly_severity')
+        .select('id, created_at, block_number, block_time_avg, gas_price, rpc_latency, tx_count, shielded_tx_count, src20_transfer_count, chain_id, health_score, anomaly, anomaly_severity')
         .gte('created_at', since)
         .order('created_at', { ascending: false })
         .limit(limit)
@@ -115,7 +118,7 @@ export async function GET(req: NextRequest) {
     const since30d = new Date(Date.now() - 30 * 86_400_000).toISOString()
     const { data: rows, error } = await supabase
       .from('network_snapshots')
-      .select('created_at, block_time_avg, gas_price, rpc_latency, tx_count, shielded_tx_count, health_score, anomaly')
+      .select('created_at, block_time_avg, gas_price, rpc_latency, tx_count, shielded_tx_count, src20_transfer_count, health_score, anomaly')
       .gte('created_at', since30d)
       .order('created_at', { ascending: false })
 

@@ -1,5 +1,8 @@
 -- SeismicLens — network_snapshots table
--- Run this once in the Supabase SQL editor for a new project.
+-- Run this once in the Supabase SQL editor for a NEW project.
+-- For an EXISTING project already running an older version of this schema,
+-- run the files in supabase/migrations/ instead (in order) — this file is
+-- the fresh-install baseline, not an idempotent migration path.
 
 create table if not exists network_snapshots (
   id                 bigint generated always as identity primary key,
@@ -12,7 +15,8 @@ create table if not exists network_snapshots (
   rpc_latency_p95    integer,
   rpc_latency_p99    integer,
   tx_count           integer not null default 0,
-  shielded_tx_count  integer not null default 0,
+  shielded_tx_count  integer not null default 0, -- type 0x4A (encrypted calldata) only
+  src20_transfer_count integer not null default 0, -- SUSDC value-hidden transfers (separate mechanism, never summed with shielded_tx_count)
   chain_id           integer not null,
   health_score       integer,
   anomaly            boolean not null default false,
