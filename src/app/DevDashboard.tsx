@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
-import { RPC_HTTP, EXPLORER_URL, SHIELDED_TX_TYPE, seismicTimestampToSeconds } from '@/lib/chain'
+import { RPC_HTTP, EXPLORER_URL, SHIELDED_TX_TYPE, NATIVE_CURRENCY, seismicTimestampToSeconds } from '@/lib/chain'
 
 async function rpcCall(method: string, params: unknown[] = []) {
   const res = await fetch(RPC_HTTP, {
@@ -37,7 +37,7 @@ interface DevTx {
 
 interface DevStats {
   txCount: number
-  totalGasETH: number
+  totalGasNative: number
   unknownGasCount: number
   contractsDeployed: number
   shieldedTxCount: number
@@ -233,7 +233,7 @@ export function DevDashboardTab() {
 
       setStats({
         txCount: txs.length,
-        totalGasETH: totalGas,
+        totalGasNative: totalGas,
         unknownGasCount,
         contractsDeployed,
         shieldedTxCount,
@@ -296,9 +296,9 @@ export function DevDashboardTab() {
         <>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, marginBottom: '1.5rem' }}>
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, padding: '1rem 1.25rem' }}>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>ETH Balance</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>{NATIVE_CURRENCY.symbol} Balance</div>
               <div style={{ fontSize: 24, fontWeight: 600, color: 'var(--accent)' }}>{stats.balance}</div>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>ETH</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>{NATIVE_CURRENCY.symbol}</div>
             </div>
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, padding: '1rem 1.25rem' }}>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Transactions</div>
@@ -317,9 +317,9 @@ export function DevDashboardTab() {
             </div>
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, padding: '1rem 1.25rem' }}>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Gas Spent</div>
-              <div style={{ fontSize: 24, fontWeight: 600, color: 'var(--series-gas)' }}>{stats.totalGasETH.toFixed(8)}</div>
+              <div style={{ fontSize: 24, fontWeight: 600, color: 'var(--series-gas)' }}>{stats.totalGasNative.toFixed(8)}</div>
               <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>
-                ETH total{stats.unknownGasCount > 0 ? ` · ${stats.unknownGasCount} tx w/o receipt excluded` : ''}
+                {NATIVE_CURRENCY.symbol} total{stats.unknownGasCount > 0 ? ` · ${stats.unknownGasCount} tx w/o receipt excluded` : ''}
               </div>
             </div>
           </div>
@@ -338,7 +338,7 @@ export function DevDashboardTab() {
                     <th style={{ textAlign: 'left', paddingBottom: 8, fontWeight: 500 }}>Hash</th>
                     <th style={{ textAlign: 'left', paddingBottom: 8, fontWeight: 500 }}>Type</th>
                     <th style={{ textAlign: 'left', paddingBottom: 8, fontWeight: 500 }}>Age</th>
-                    <th style={{ textAlign: 'right', paddingBottom: 8, fontWeight: 500 }}>Gas (ETH)</th>
+                    <th style={{ textAlign: 'right', paddingBottom: 8, fontWeight: 500 }}>Gas ({NATIVE_CURRENCY.symbol})</th>
                   </tr>
                 </thead>
                 <tbody>

@@ -3,7 +3,11 @@ export const RPC_HTTP = 'https://testnet-1.seismictest.net/rpc'
 export const RPC_WSS = 'wss://testnet-1.seismictest.net/ws'
 export const CHAIN_ID = 5124
 export const EXPLORER_URL = 'https://seismic-testnet.socialscan.io'
-export const NATIVE_CURRENCY = { name: 'Ether', symbol: 'ETH', decimals: 18 }
+// Seismic's native gas/currency token is SIZE, not ETH — confirmed on the
+// explorer ("Balance: 0.0 SIZE" on any address page). Easy assumption to
+// carry over by habit from standard EVM chains; every gas/balance display
+// in this app must reference this constant instead of hardcoding "ETH".
+export const NATIVE_CURRENCY = { name: 'SIZE', symbol: 'SIZE', decimals: 18 }
 
 // Seismic's shielded transaction type — encrypted calldata (type 0x4A), decrypted
 // only inside the TEE. See https://docs.seismic.systems/overview/how-seismic-works

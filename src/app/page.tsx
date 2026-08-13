@@ -2,7 +2,7 @@
 import { useSeismicData } from './useSeismicData'
 import { useState, useEffect } from 'react'
 import { ConnectButton, DevDashboardTab } from './DevDashboard'
-import { RPC_HTTP, RPC_WSS, EXPLORER_URL, CHAIN_ID, SHIELDED_TX_TYPE, SUSDC_CONTRACT, SRC20_TRANSFER_TOPIC, SUSDC_FAUCET_DISPENSER, GET_LOGS_MAX_RANGE, seismicTimestampToSeconds } from '@/lib/chain'
+import { RPC_HTTP, RPC_WSS, EXPLORER_URL, CHAIN_ID, SHIELDED_TX_TYPE, SUSDC_CONTRACT, SRC20_TRANSFER_TOPIC, SUSDC_FAUCET_DISPENSER, GET_LOGS_MAX_RANGE, NATIVE_CURRENCY, seismicTimestampToSeconds } from '@/lib/chain'
 import {
   LineChart, Line, BarChart, Bar,
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -203,7 +203,7 @@ function DashboardTab() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, marginBottom: '1.5rem' }}>
         <MetricCard label="Latest block" value={data.latestBlock > 0 ? data.latestBlock.toLocaleString() : '—'} unit="block number" color="var(--text-primary)" />
         <MetricCard label="Avg block time" value={data.avgBlockTime > 0 ? `${data.avgBlockTime}s` : '—'} unit="last 10 blocks" color="var(--series-tx)" />
-        <MetricCard label="Gas price" value={data.gasPrice !== '0' ? `${data.gasPrice}` : '—'} unit="gwei · paid in ETH" color="var(--status-warning)" />
+        <MetricCard label="Gas price" value={data.gasPrice !== '0' ? `${data.gasPrice}` : '—'} unit={`gwei · paid in ${NATIVE_CURRENCY.symbol}`} color="var(--status-warning)" />
         <MetricCard label="RPC latency" value={data.rpcLatency > 0 ? `${data.rpcLatency}ms` : '—'} unit="response time" color="var(--series-shielded)" />
         <MetricCard label="Tx (last block)" value={data.blocks.length > 0 ? data.blocks[data.blocks.length - 1].txCount : '—'} unit="transactions" color="var(--text-primary)" />
         <MetricCard label="Chain ID" value={data.chainId > 0 ? data.chainId : '—'} unit="Seismic Testnet" color="var(--text-muted)" />
@@ -556,7 +556,7 @@ function ReportsTab() {
                     <div style={{ marginTop: '1rem', background: 'var(--bg-page)', borderRadius: 2, padding: '1rem', fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.7 }}>
                       <strong style={{ color: 'var(--text-primary)' }}>Summary</strong><br />
                       On {selected}, the Seismic testnet recorded an average block time of <strong style={{ color: 'var(--accent)' }}>{avgBlockTime.toFixed(3)}s</strong> {avgBlockTime < 1 ? '— within the sub-second target.' : '— slightly above the sub-second target.'}{' '}
-                      Gas remained at <strong style={{ color: 'var(--status-warning)' }}>{avgGas.toFixed(4)} gwei</strong> paid in ETH.{' '}
+                      Gas remained at <strong style={{ color: 'var(--status-warning)' }}>{avgGas.toFixed(4)} gwei</strong> paid in {NATIVE_CURRENCY.symbol}.{' '}
                       RPC latency averaged <strong style={{ color: 'var(--series-shielded)' }}>{Math.round(avgLatency)}ms</strong>.{' '}
                       Network status: <strong style={{ color: status.color }}>{status.label}</strong>.{' '}
                       Click <strong style={{ color: 'var(--ai-accent)' }}>✨ AI Report</strong> to generate a full analysis.
@@ -632,7 +632,7 @@ function TxTypeBreakdown() {
         setBlocksScanned(scanCount)
         setTypes([
           { label: 'Shielded (0x4A)', count: shielded, color: 'var(--accent)', icon: '🔒', description: 'Encrypted calldata — decrypted only inside the TEE' },
-          { label: 'ETH Transfer', count: transfers, color: 'var(--series-tx)', icon: '💸', description: 'Simple value transfers between wallets' },
+          { label: `${NATIVE_CURRENCY.symbol} Transfer`, count: transfers, color: 'var(--series-tx)', icon: '💸', description: 'Simple value transfers between wallets' },
           { label: 'Token Transfer (ERC-20)', count: tokenTransfers, color: 'var(--status-warning)', icon: '🪙', description: 'ERC-20 token transfers via transfer()' },
           { label: 'Contract Call', count: contractCalls, color: 'var(--series-shielded)', icon: '⚙️', description: 'Interactions with deployed contracts' },
           { label: 'Contract Deploy', count: contractDeploys, color: 'var(--text-muted)', icon: '📄', description: 'New smart contracts deployed' },
@@ -1053,7 +1053,7 @@ function NetworkStatusTab() {
 
 // ─── GAS ESTIMATOR ───────────────────────────────────────────────
 const GAS_OPERATIONS = [
-  { label: 'Simple ETH Transfer', gas: 21000, description: 'Basic transfer between wallets' },
+  { label: `Simple ${NATIVE_CURRENCY.symbol} Transfer`, gas: 21000, description: 'Basic transfer between wallets' },
   { label: 'ERC-20 Token Transfer', gas: 65000, description: 'Transfer an ERC-20 token' },
   { label: 'ERC-20 Token Approval', gas: 46000, description: 'Approve a token spender' },
   { label: 'SRC20 Shielded Transfer', gas: 90000, description: 'Transfer with suint256 balances (CLOAD/CSTORE)' },
@@ -1079,15 +1079,15 @@ function GasEstimator() {
   const gasLimit = customGas ? parseInt(customGas) : op.gas
   const gasPriceGwei = gasPrice ?? 1
   const costGwei = gasLimit * gasPriceGwei
-  const costETH = (costGwei / 1e9).toFixed(10)
-  const costETHDisplay = parseFloat(costETH) < 0.0000001
-    ? '< 0.0000001 ETH'
-    : `${parseFloat(costETH).toFixed(8)} ETH`
+  const costNative = (costGwei / 1e9).toFixed(10)
+  const costNativeDisplay = parseFloat(costNative) < 0.0000001
+    ? `< 0.0000001 ${NATIVE_CURRENCY.symbol}`
+    : `${parseFloat(costNative).toFixed(8)} ${NATIVE_CURRENCY.symbol}`
 
   return (
     <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, padding: '1.25rem', marginTop: '1.25rem' }}>
       <div style={{ fontSize: 12, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '1rem' }}>
-        ⛽ Gas Estimator — Cost in ETH
+        ⛽ Gas Estimator — Cost in {NATIVE_CURRENCY.symbol}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 12, marginBottom: '1rem' }}>
@@ -1117,7 +1117,7 @@ function GasEstimator() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div style={{ background: 'var(--bg-page)', borderRadius: 4, padding: '1.25rem', border: '1px solid var(--accent-border)' }}>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>Estimated cost</div>
-            <div style={{ fontSize: 32, fontWeight: 700, color: 'var(--accent)' }}>{costETHDisplay}</div>
+            <div style={{ fontSize: 32, fontWeight: 700, color: 'var(--accent)' }}>{costNativeDisplay}</div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>at current gas price</div>
           </div>
 
@@ -1137,8 +1137,8 @@ function GasEstimator() {
                 <span style={{ color: 'var(--text-primary)', fontFamily: 'monospace' }}>{costGwei.toLocaleString()} gwei</span>
               </div>
               <div style={{ borderTop: '1px solid var(--border)', paddingTop: 6, display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-muted)' }}>Cost in ETH</span>
-                <span style={{ color: 'var(--accent)', fontWeight: 600, fontFamily: 'monospace' }}>{costETHDisplay}</span>
+                <span style={{ color: 'var(--text-muted)' }}>Cost in {NATIVE_CURRENCY.symbol}</span>
+                <span style={{ color: 'var(--accent)', fontWeight: 600, fontFamily: 'monospace' }}>{costNativeDisplay}</span>
               </div>
             </div>
           </div>
@@ -1164,7 +1164,7 @@ function GasEstimator() {
           <div style={{ background: 'var(--accent-bg)', borderRadius: 4, padding: '1rem', border: '1px solid var(--accent-border-faint)' }}>
             <div style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 500, marginBottom: 4 }}>💡 Fee mechanics</div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-              Gas is priced in ETH like any standard EVM chain — Seismic doesn't change fee mechanics. Privacy comes from TEE execution and shielded storage, not from the fee market.
+              Gas is priced in {NATIVE_CURRENCY.symbol} like any standard EVM chain — Seismic doesn't change fee mechanics. Privacy comes from TEE execution and shielded storage, not from the fee market.
             </div>
           </div>
         </div>
@@ -1551,7 +1551,7 @@ function NetworkComparisonTab() {
           </div>
           <div style={{ textAlign: 'center' }}>
             <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--status-warning)' }}>{seismic.gasGwei ?? '—'} gwei</div>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Gas price (ETH)</div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Gas price ({NATIVE_CURRENCY.symbol})</div>
           </div>
           <div style={{ textAlign: 'center' }}>
             <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--series-shielded)' }}>{seismic.latency ?? '—'}ms</div>

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { NATIVE_CURRENCY } from '@/lib/chain'
 
 // Each call must generate a fresh report for whatever snapshots/period were
 // posted — never reuse a previous response for a different day.
@@ -28,7 +29,7 @@ export async function POST(req: Request) {
 Period: ${period}
 Total snapshots collected: ${snapshots.length}
 Average block time: ${avgBlockTime.toFixed(3)}s (Seismic's Summit consensus targets sub-second finality)
-Average gas price: ${avgGas.toFixed(4)} gwei (paid in ETH)
+Average gas price: ${avgGas.toFixed(4)} gwei (paid in ${NATIVE_CURRENCY.symbol})
 Average RPC latency: ${Math.round(avgLatency)}ms
 Total transactions recorded: ${totalTx}
 Shielded (type 0x4A, encrypted-calldata) transactions: ${totalShieldedTx}
