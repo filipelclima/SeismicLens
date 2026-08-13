@@ -20,6 +20,7 @@ export async function POST(req: Request) {
     const avgLatency = avg(snapshots.map((s: any) => s.rpc_latency))
     const totalTx = snapshots.reduce((a: number, s: any) => a + s.tx_count, 0)
     const totalShieldedTx = snapshots.reduce((a: number, s: any) => a + (s.shielded_tx_count ?? 0), 0)
+    const totalSrc20Transfers = snapshots.reduce((a: number, s: any) => a + (s.src20_transfer_count ?? 0), 0)
     const avgScore = avg(snapshots.map((s: any) => s.health_score ?? 75))
     const anomalies = snapshots.filter((s: any) => s.anomaly).length
     const uptime = ((snapshots.length - anomalies) / snapshots.length * 100).toFixed(1)
@@ -32,7 +33,11 @@ Average block time: ${avgBlockTime.toFixed(3)}s (Seismic's Summit consensus targ
 Average gas price: ${avgGas.toFixed(4)} gwei (paid in ${NATIVE_CURRENCY.symbol})
 Average RPC latency: ${Math.round(avgLatency)}ms
 Total transactions recorded: ${totalTx}
-Shielded (type 0x4A, encrypted-calldata) transactions: ${totalShieldedTx}
+
+Seismic has TWO independent privacy mechanisms — report them separately, never combine into one figure:
+- Shielded (type 0x4A, encrypted-calldata) transactions: ${totalShieldedTx}
+- SRC20 value-hidden transfers (SUSDC, an ordinary tx.type 0x0 call whose event omits the transferred amount): ${totalSrc20Transfers}
+
 Average health score: ${Math.round(avgScore)}/100
 Anomalies detected: ${anomalies}
 Network uptime: ${uptime}%
@@ -41,7 +46,7 @@ Write a structured weekly report with these sections:
 1. Executive Summary (2-3 sentences)
 2. Network Performance (block time analysis, sub-second finality target compliance)
 3. Gas & Fees (stability, predictability for builders)
-4. Privacy Adoption (what the shielded-transaction share suggests about SRC20/confidential contract usage)
+4. Privacy Adoption (cover BOTH mechanisms above separately — 0x4A encrypted-calldata activity and SRC20 value-hidden transfers are not interchangeable and must not be added together into a single number)
 5. Network Health (score analysis, anomalies if any)
 6. Builder Insights (what this means for developers building on Seismic)
 7. Outlook (brief forward-looking statement)

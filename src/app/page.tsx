@@ -62,6 +62,7 @@ interface Snapshot {
   rpc_latency: number
   tx_count: number
   shielded_tx_count: number
+  src20_transfer_count: number
   chain_id: number
 }
 
@@ -157,9 +158,19 @@ function DashboardTab() {
   const { data, refresh } = useSeismicData()
   const [gasHistory, setGasHistory] = useState<{day: string; gas: number}[]>([])
   const [shieldedHistory, setShieldedHistory] = useState<{day: string; shielded: number; total: number}[]>([])
+  const [src20History, setSrc20History] = useState<{day: string; src20: number}[]>([])
+  // Gate the three history charts on raw snapshot count, not distinct-day
+  // count: groupByDay collapses same-day snapshots into one point, so on a
+  // fresh deployment "2 distinct days" can take up to ~24h to reach even
+  // with plenty of snapshots already collected. 2 snapshots is enough to
+  // plot something, even if they land on the same day (one point, not a
+  // line — still better than "Collecting data..." with real data sitting
+  // right there).
+  const [snapshotCount, setSnapshotCount] = useState(0)
 
   useEffect(() => {
     fetchSnapshots().then(snaps => {
+      setSnapshotCount(snaps.length)
       const byDay = groupByDay(snaps)
       const gh = Object.entries(byDay).sort().map(([day, s]) => ({
         day: day.slice(5), // MM-DD
@@ -173,6 +184,12 @@ function DashboardTab() {
         total: s.reduce((a, x) => a + x.tx_count, 0),
       }))
       setShieldedHistory(sh)
+
+      const s20 = Object.entries(byDay).sort().map(([day, s]) => ({
+        day: day.slice(5),
+        src20: s.reduce((a, x) => a + (x.src20_transfer_count ?? 0), 0),
+      }))
+      setSrc20History(s20)
     })
   }, [])
 
@@ -237,12 +254,13 @@ function DashboardTab() {
         </div>
       </div>
 
-      {/* Gas History + Shielded Activity History */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(0, 1fr)', gap: 12, marginBottom: '1.5rem' }}>
+      {/* Gas History + 0x4A History + SRC20 History — three independent metrics,
+         each gated on raw snapshot count (>=2), not distinct-day count */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12, marginBottom: '1.5rem' }}>
         <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, padding: '1rem 1.25rem' }}>
           <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Gas price history</div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10 }}>Average gwei per day — from Supabase snapshots</div>
-          {gasHistory.length < 2 ? (
+          {snapshotCount < 2 ? (
             <div style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', padding: '2rem 0' }}>Collecting data... visit /api/collect to generate snapshots</div>
           ) : (
             <ResponsiveContainer width="100%" height={150}>
@@ -258,9 +276,9 @@ function DashboardTab() {
         </div>
 
         <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, padding: '1rem 1.25rem' }}>
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Shielded tx history</div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>0x4A tx history</div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10 }}>Type 0x4A (encrypted calldata) txs per day</div>
-          {shieldedHistory.length < 2 ? (
+          {snapshotCount < 2 ? (
             <div style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', padding: '2rem 0' }}>Collecting data... more snapshots needed</div>
           ) : (
             <ResponsiveContainer width="100%" height={150}>
@@ -270,6 +288,24 @@ function DashboardTab() {
                 <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} width={28} />
                 <Tooltip {...chartTooltipStyle} />
                 <Bar dataKey="shielded" fill="var(--series-shielded)" radius={[3, 3, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+
+        <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, padding: '1rem 1.25rem' }}>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>SRC20 transfer history</div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10 }}>SUSDC value-hidden transfers per day — separate mechanism, never summed with 0x4A</div>
+          {snapshotCount < 2 ? (
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', padding: '2rem 0' }}>Collecting data... more snapshots needed</div>
+          ) : (
+            <ResponsiveContainer width="100%" height={150}>
+              <BarChart data={src20History}>
+                <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" />
+                <XAxis dataKey="day" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} />
+                <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} width={28} />
+                <Tooltip {...chartTooltipStyle} />
+                <Bar dataKey="src20" fill="var(--accent)" radius={[3, 3, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           )}
