@@ -1698,6 +1698,10 @@ interface Src20Stats {
   // peerToPeerCount is ever > 0, that's the signal real usage has started.
   faucetCount: number
   peerToPeerCount: number
+  // SUSDC emits its transfer event twice per real transfer (byte-identical
+  // logs, only logIndex differs) — this is how many duplicate log rows were
+  // collapsed to get `count` above. See CLAUDE.md's SRC20 double-emission note.
+  duplicateLogsRemoved: number
 }
 
 interface Type4aStats {
@@ -1736,9 +1740,20 @@ async function fetchSrc20Transfers(latest: number): Promise<Src20Stats> {
     for (const r of results) if (Array.isArray(r)) logs.push(...r)
   }
 
+  // SUSDC emits this transfer event TWICE per real transfer — confirmed across
+  // every transaction observed (2,146 logs / 1,073 txs, 100% in pairs): the two
+  // logs are byte-identical (same address, topics, data), differing only in
+  // logIndex. Not two real events — dedupe by transactionHash before counting,
+  // or every count below (and the recent-transfers table) is inflated 2x.
+  // See CLAUDE.md's SRC20 double-emission note.
+  const dedupedLogs = Array.from(
+    new Map(logs.map(log => [log.transactionHash, log])).values()
+  )
+  const duplicateLogsRemoved = logs.length - dedupedLogs.length
+
   const senders = new Set<string>()
   const recipients = new Set<string>()
-  const events: Src20TransferEvent[] = logs.map(log => {
+  const events: Src20TransferEvent[] = dedupedLogs.map(log => {
     const from = '0x' + (log.topics?.[1] ?? '').slice(-40)
     const to = '0x' + (log.topics?.[2] ?? '').slice(-40)
     senders.add(from)
@@ -1767,6 +1782,7 @@ async function fetchSrc20Transfers(latest: number): Promise<Src20Stats> {
     blocksScanned: latest - fromBlock,
     faucetCount,
     peerToPeerCount: events.length - faucetCount,
+    duplicateLogsRemoved,
   }
 }
 
@@ -2045,6 +2061,11 @@ function ShieldedActivityTab() {
               <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>SRC20 Transfers Found</div>
               <div style={{ fontSize: 26, fontWeight: 600, color: 'var(--accent)' }}>{src20Stats.count}</div>
               <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>last {src20Stats.blocksScanned.toLocaleString()} blocks</div>
+              {src20Stats.duplicateLogsRemoved > 0 && (
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, fontStyle: 'italic' }}>
+                  SUSDC emits 2 identical logs per transfer — {src20Stats.duplicateLogsRemoved.toLocaleString()} duplicates deduped by tx hash
+                </div>
+              )}
             </div>
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, padding: '1rem 1.25rem' }}>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Faucet vs. Peer-to-Peer</div>
