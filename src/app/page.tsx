@@ -2,7 +2,7 @@
 import { useSeismicData } from './useSeismicData'
 import { useState, useEffect } from 'react'
 import { ConnectButton, DevDashboardTab } from './DevDashboard'
-import { RPC_HTTP, RPC_WSS, EXPLORER_URL, CHAIN_ID, SHIELDED_TX_TYPE, seismicTimestampToSeconds } from '@/lib/chain'
+import { RPC_HTTP, RPC_WSS, EXPLORER_URL, CHAIN_ID, SHIELDED_TX_TYPE, SUSDC_CONTRACT, SRC20_TRANSFER_TOPIC, SUSDC_FAUCET_DISPENSER, GET_LOGS_MAX_RANGE, seismicTimestampToSeconds } from '@/lib/chain'
 import {
   LineChart, Line, BarChart, Bar,
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -1632,40 +1632,171 @@ function NetworkComparisonTab() {
 }
 
 // ─── SHIELDED ACTIVITY MONITOR ────────────────────────────────────
-// Seismic's shielded transaction type (0x4A) carries encrypted calldata,
-// decrypted only inside the TEE — see docs.seismic.systems/overview/how-seismic-works.
-// Unlike Arc's Memo Activity (a single well-known contract), shielded txs can
-// target *any* contract, so detection is by tx.type, not by a recipient address.
-const SHIELDED_SCAN_RANGE = 2000
-const SHIELDED_SCAN_BATCH_SIZE = 50
+// Two INDEPENDENT privacy mechanisms on Seismic, detected and counted
+// separately — never sum them into one number:
+//
+// 1. tx.type === 0x4A: encrypted CALLDATA, decrypted only inside the TEE
+//    (docs.seismic.systems/overview/how-seismic-works). Can target *any*
+//    contract, so detection is by tx.type, not by a recipient address.
+//    Only found via block-by-block scanning — this RPC has no indexed way
+//    to filter by tx type, so the scan window is capped by RPC-call budget
+//    (1 call per block). Confirmed live: real 0x4A activity exists on this
+//    chain but was found ~19 days / ~6.5M blocks back, not near the current
+//    tip — no block-by-block window we can afford client-side reaches that
+//    far back. This scan can only catch NEW 0x4A activity going forward.
+// 2. SRC20_TRANSFER_TOPIC via eth_getLogs on SUSDC_CONTRACT: encrypted
+//    VALUE — an ordinary tx.type 0x0 call whose transfer event omits the
+//    amount. eth_getLogs is an indexed query (not block-by-block), so it
+//    can affordably cover a far wider window — see GET_LOGS_MAX_RANGE.
+// Two scan sizes, not one: the automatic scan on tab-open must stay fast (this
+// is 1 RPC call per block — there's no indexed way to filter by tx.type on this
+// node), so it defaults to a small window. A much wider scan is available but
+// opt-in only, behind a button that states its RPC cost up front — see
+// CLAUDE.md's "Shielded Activity scanning" note for the full cost table and
+// why moving this server-side (into /api/collect + Supabase) is the correct
+// long-term direction, deliberately not done yet.
+const TYPE_4A_AUTO_SCAN_RANGE = 2_000 // ~18s wall time (40 batches × ~500ms/batch observed)
+const TYPE_4A_WIDE_SCAN_RANGE = 10_000 // opt-in only — ~100s wall time (200 batches), user is warned before clicking
+const TYPE_4A_SCAN_BATCH_SIZE = 50
+const SRC20_LOG_SCAN_RANGE = 5_000_000 // ~50 eth_getLogs calls at the 100k/call ceiling — seconds, not minutes
+const SRC20_LOG_BATCH_CONCURRENCY = 10 // parallel eth_getLogs calls in flight at once
 
-interface ShieldedTx {
+function formatCoverage(minutes: number | null): string {
+  if (minutes === null || minutes < 0) return 'unknown period'
+  if (minutes < 1) return `~${Math.max(1, Math.round(minutes * 60))}s`
+  if (minutes < 60) return `~${Math.round(minutes)} min`
+  const hours = minutes / 60
+  if (hours < 48) return `~${hours.toFixed(1)}h`
+  return `~${(hours / 24).toFixed(1)} days`
+}
+
+interface Type4aTx {
   hash: string
   block: number
   target: string
   timestamp: number
 }
 
-interface ShieldedStats {
+interface Src20TransferEvent {
+  hash: string
+  block: number
+  from: string
+  to: string
+  timestamp: number
+  isFaucet: boolean
+}
+
+interface Src20Stats {
+  count: number
+  uniqueSenders: number
+  uniqueRecipients: number
+  perHour: number
+  recent: Src20TransferEvent[]
+  blocksScanned: number
+  // Every SRC20 transfer observed to date comes from the same faucet address —
+  // this split exists so the metric can't be misread as organic adoption. If
+  // peerToPeerCount is ever > 0, that's the signal real usage has started.
+  faucetCount: number
+  peerToPeerCount: number
+}
+
+interface Type4aStats {
   totalShielded: number
   totalTx: number
   uniqueTargets: number
   shieldedPerHour: number
-  recentShielded: ShieldedTx[]
+  recentShielded: Type4aTx[]
   blocksScanned: number
+  // Computed from the actual timestamps of the scanned blocks (not assumed from
+  // a fixed block time) — how much wall-clock chain history this scan covers.
+  coverageMinutes: number | null
+}
+
+async function fetchSrc20Transfers(latest: number): Promise<Src20Stats> {
+  const fromBlock = Math.max(0, latest - SRC20_LOG_SCAN_RANGE)
+  const chunkStarts: number[] = []
+  for (let start = fromBlock; start <= latest; start += GET_LOGS_MAX_RANGE) {
+    chunkStarts.push(start)
+  }
+
+  const logs: any[] = []
+  for (let i = 0; i < chunkStarts.length; i += SRC20_LOG_BATCH_CONCURRENCY) {
+    const batch = chunkStarts.slice(i, i + SRC20_LOG_BATCH_CONCURRENCY)
+    const results = await Promise.all(
+      batch.map(start => {
+        const end = Math.min(start + GET_LOGS_MAX_RANGE - 1, latest)
+        return rpcCall('eth_getLogs', [{
+          fromBlock: '0x' + start.toString(16),
+          toBlock: '0x' + end.toString(16),
+          address: SUSDC_CONTRACT,
+          topics: [SRC20_TRANSFER_TOPIC],
+        }]).catch(() => [])
+      })
+    )
+    for (const r of results) if (Array.isArray(r)) logs.push(...r)
+  }
+
+  const senders = new Set<string>()
+  const recipients = new Set<string>()
+  const events: Src20TransferEvent[] = logs.map(log => {
+    const from = '0x' + (log.topics?.[1] ?? '').slice(-40)
+    const to = '0x' + (log.topics?.[2] ?? '').slice(-40)
+    senders.add(from)
+    recipients.add(to)
+    return {
+      hash: log.transactionHash,
+      block: hexToNum(log.blockNumber),
+      from,
+      to,
+      timestamp: seismicTimestampToSeconds(log.blockTimestamp),
+      isFaucet: from.toLowerCase() === SUSDC_FAUCET_DISPENSER,
+    }
+  })
+
+  const now = Math.floor(Date.now() / 1000)
+  const oneHourAgo = now - 3600
+  const perHour = events.filter(e => e.timestamp > oneHourAgo).length
+  const faucetCount = events.filter(e => e.isFaucet).length
+
+  return {
+    count: events.length,
+    uniqueSenders: senders.size,
+    uniqueRecipients: recipients.size,
+    perHour,
+    recent: events.sort((a, b) => b.timestamp - a.timestamp).slice(0, 10),
+    blocksScanned: latest - fromBlock,
+    faucetCount,
+    peerToPeerCount: events.length - faucetCount,
+  }
 }
 
 function ShieldedActivityTab() {
-  const [stats, setStats] = useState<ShieldedStats | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
+  // The two mechanisms below are fetched and rendered fully independently —
+  // separate state, separate loading flags, separate effects. Do NOT await
+  // them together (e.g. via a shared Promise.all): the 0x4A block-by-block
+  // scan can take well over a minute, and gating the fast (~3.5s) SRC20
+  // eth_getLogs result behind it means the whole tab looks hung.
+  const [type4aStats, setType4aStats] = useState<Type4aStats | null>(null)
+  const [type4aLoading, setType4aLoading] = useState(true)
+  const [type4aProgress, setType4aProgress] = useState(0)
+  const [type4aRangeInFlight, setType4aRangeInFlight] = useState(TYPE_4A_AUTO_SCAN_RANGE)
+  const [type4aError, setType4aError] = useState(false)
+  const [type4aUpdated, setType4aUpdated] = useState<Date | null>(null)
 
-  async function loadShieldedData() {
-    setLoading(true)
+  const [src20Stats, setSrc20Stats] = useState<Src20Stats | null>(null)
+  const [src20Loading, setSrc20Loading] = useState(true)
+  const [src20Error, setSrc20Error] = useState(false)
+  const [src20Updated, setSrc20Updated] = useState<Date | null>(null)
+
+  async function loadType4aData(range: number) {
+    setType4aLoading(true)
+    setType4aError(false)
+    setType4aProgress(0)
+    setType4aRangeInFlight(range)
     try {
       const blockHex = await rpcCall('eth_blockNumber')
       const latest = hexToNum(blockHex)
-      const fromBlock = Math.max(0, latest - SHIELDED_SCAN_RANGE)
+      const fromBlock = Math.max(0, latest - range)
 
       const allBlockNums = Array.from(
         { length: latest - fromBlock + 1 },
@@ -1673,17 +1804,18 @@ function ShieldedActivityTab() {
       )
 
       const blocks: any[] = []
-      for (let i = 0; i < allBlockNums.length; i += SHIELDED_SCAN_BATCH_SIZE) {
-        const chunk = allBlockNums.slice(i, i + SHIELDED_SCAN_BATCH_SIZE)
+      for (let i = 0; i < allBlockNums.length; i += TYPE_4A_SCAN_BATCH_SIZE) {
+        const chunk = allBlockNums.slice(i, i + TYPE_4A_SCAN_BATCH_SIZE)
         const chunkResults = await Promise.all(
           chunk.map(n =>
             rpcCall('eth_getBlockByNumber', ['0x' + n.toString(16), true]).catch(() => null)
           )
         )
         blocks.push(...chunkResults)
+        setType4aProgress(prev => Math.min(prev + chunk.length, allBlockNums.length))
       }
 
-      const shieldedTxs: ShieldedTx[] = []
+      const shieldedTxs: Type4aTx[] = []
       const targets = new Set<string>()
       let totalTx = 0
 
@@ -1708,24 +1840,63 @@ function ShieldedActivityTab() {
       const oneHourAgo = now - 3600
       const recentCount = shieldedTxs.filter(m => m.timestamp > oneHourAgo).length
 
-      setStats({
+      // Derived from the actual scanned blocks' own timestamps, not an assumed
+      // block time — accurate regardless of how the chain's block rate drifts.
+      const validBlocks = blocks.filter(b => b?.timestamp)
+      const coverageMinutes = validBlocks.length >= 2
+        ? (seismicTimestampToSeconds(validBlocks[validBlocks.length - 1].timestamp) - seismicTimestampToSeconds(validBlocks[0].timestamp)) / 60
+        : null
+
+      setType4aStats({
         totalShielded: shieldedTxs.length,
         totalTx,
         uniqueTargets: targets.size,
         shieldedPerHour: recentCount,
         recentShielded: shieldedTxs.sort((a, b) => b.timestamp - a.timestamp).slice(0, 10),
-        blocksScanned: SHIELDED_SCAN_RANGE,
+        blocksScanned: range,
+        coverageMinutes,
       })
-      setLastUpdated(new Date())
+      setType4aUpdated(new Date())
     } catch (e) {
       console.error(e)
+      setType4aError(true)
     }
-    setLoading(false)
+    setType4aLoading(false)
   }
 
-  useEffect(() => { loadShieldedData() }, [])
+  async function loadSrc20Data() {
+    setSrc20Loading(true)
+    setSrc20Error(false)
+    try {
+      const blockHex = await rpcCall('eth_blockNumber')
+      const latest = hexToNum(blockHex)
+      const stats = await fetchSrc20Transfers(latest)
+      setSrc20Stats(stats)
+      setSrc20Updated(new Date())
+    } catch (e) {
+      console.error(e)
+      setSrc20Error(true)
+    }
+    setSrc20Loading(false)
+  }
 
-  const shieldedPct = stats && stats.totalTx > 0 ? ((stats.totalShielded / stats.totalTx) * 100).toFixed(2) : '0.00'
+  useEffect(() => {
+    loadType4aData(TYPE_4A_AUTO_SCAN_RANGE)
+    loadSrc20Data()
+  }, [])
+
+  function refreshAll() {
+    loadType4aData(TYPE_4A_AUTO_SCAN_RANGE)
+    loadSrc20Data()
+  }
+
+  function loadType4aWideScan() {
+    loadType4aData(TYPE_4A_WIDE_SCAN_RANGE)
+  }
+
+  const shieldedPct = type4aStats && type4aStats.totalTx > 0
+    ? ((type4aStats.totalShielded / type4aStats.totalTx) * 100).toFixed(2)
+    : '0.00'
 
   return (
     <div>
@@ -1736,7 +1907,7 @@ function ShieldedActivityTab() {
             Type-0x4A encrypted transactions on Seismic — calldata visible only inside the TEE
           </div>
         </div>
-        <button onClick={loadShieldedData} disabled={loading}
+        <button onClick={refreshAll} disabled={type4aLoading || src20Loading}
           style={{ fontSize: 12, padding: '6px 14px', borderRadius: 2, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer' }}>
           ↻ Refresh
         </button>
@@ -1750,40 +1921,55 @@ function ShieldedActivityTab() {
         </div>
       </div>
 
-      {loading ? (
-        <div style={{ fontSize: 13, color: 'var(--text-muted)', textAlign: 'center', padding: '3rem' }}>
-          Scanning last {SHIELDED_SCAN_RANGE} blocks for shielded activity... (may take a few seconds)
+      {type4aLoading ? (
+        <div style={{ fontSize: 13, color: 'var(--text-muted)', textAlign: 'center', padding: '2rem' }}>
+          <div style={{ marginBottom: 10 }}>
+            Scanning blocks for 0x4A activity — {type4aProgress.toLocaleString()} / {type4aRangeInFlight.toLocaleString()}
+          </div>
+          <div style={{ maxWidth: 320, margin: '0 auto', height: 4, background: 'var(--border)', borderRadius: 2, overflow: 'hidden' }}>
+            <div style={{ width: `${type4aRangeInFlight > 0 ? (type4aProgress / type4aRangeInFlight) * 100 : 0}%`, height: '100%', background: 'var(--accent)', transition: 'width 0.2s' }} />
+          </div>
         </div>
-      ) : stats ? (
+      ) : type4aStats ? (
         <>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, marginBottom: '1.25rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, marginBottom: '0.75rem' }}>
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, padding: '1rem 1.25rem' }}>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Shielded Txs Found</div>
-              <div style={{ fontSize: 26, fontWeight: 600, color: 'var(--accent)' }}>{stats.totalShielded}</div>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>last {stats.blocksScanned} blocks</div>
+              <div style={{ fontSize: 26, fontWeight: 600, color: 'var(--accent)' }}>{type4aStats.totalShielded}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>{formatCoverage(type4aStats.coverageMinutes)} of chain ({type4aStats.blocksScanned.toLocaleString()} blocks)</div>
             </div>
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, padding: '1rem 1.25rem' }}>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Share of All Txs</div>
               <div style={{ fontSize: 26, fontWeight: 600, color: 'var(--status-warning)' }}>{shieldedPct}%</div>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>of {stats.totalTx.toLocaleString()} scanned</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>of {type4aStats.totalTx.toLocaleString()} scanned</div>
             </div>
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, padding: '1rem 1.25rem' }}>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Unique Targets</div>
-              <div style={{ fontSize: 26, fontWeight: 600, color: 'var(--series-shielded)' }}>{stats.uniqueTargets}</div>
+              <div style={{ fontSize: 26, fontWeight: 600, color: 'var(--series-shielded)' }}>{type4aStats.uniqueTargets}</div>
               <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>contracts receiving shielded calls</div>
             </div>
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, padding: '1rem 1.25rem' }}>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Last Hour</div>
-              <div style={{ fontSize: 26, fontWeight: 600, color: 'var(--series-tx)' }}>{stats.shieldedPerHour}</div>
+              <div style={{ fontSize: 26, fontWeight: 600, color: 'var(--series-tx)' }}>{type4aStats.shieldedPerHour}</div>
               <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>shielded txs</div>
             </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: '1.25rem' }}>
+            <button onClick={loadType4aWideScan} disabled={type4aLoading}
+              style={{ fontSize: 12, padding: '6px 12px', borderRadius: 2, border: '1px solid var(--accent-border)', background: 'var(--accent-bg)', color: 'var(--accent)', cursor: type4aLoading ? 'default' : 'pointer' }}>
+              🔍 Wide scan ({TYPE_4A_WIDE_SCAN_RANGE.toLocaleString()} blocks)
+            </button>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+              ~{TYPE_4A_WIDE_SCAN_RANGE.toLocaleString()} RPC calls, can take 1–2 minutes — covers more chain history than the automatic scan above
+            </span>
           </div>
 
           <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, padding: '1.25rem' }}>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '1rem' }}>
               Recent shielded transactions
             </div>
-            {stats.recentShielded.length === 0 ? (
+            {type4aStats.recentShielded.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '2rem' }}>
                 <div style={{ fontSize: 32, marginBottom: 12 }}>🔓</div>
                 <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 6 }}>No shielded transactions found yet</div>
@@ -1803,7 +1989,7 @@ function ShieldedActivityTab() {
                   </tr>
                 </thead>
                 <tbody>
-                  {stats.recentShielded.map(m => (
+                  {type4aStats.recentShielded.map(m => (
                     <tr key={m.hash} style={{ borderTop: '1px solid var(--border)' }}>
                       <td style={{ padding: '8px 0', color: 'var(--series-tx)', fontFamily: 'monospace' }}>
                         <a href={`${EXPLORER_URL}/tx/${m.hash}`} target="_blank" rel="noopener noreferrer"
@@ -1822,17 +2008,122 @@ function ShieldedActivityTab() {
             )}
           </div>
 
-          {lastUpdated && (
+          {type4aUpdated && (
             <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: '1rem', textAlign: 'right' }}>
-              Last updated: {lastUpdated.toLocaleTimeString()} · Detected via tx.type === {SHIELDED_TX_TYPE}
+              Last updated: {type4aUpdated.toLocaleTimeString()} · Detected via tx.type === {SHIELDED_TX_TYPE}
             </div>
           )}
         </>
-      ) : (
+      ) : type4aError ? (
         <div style={{ fontSize: 13, color: 'var(--status-critical)', textAlign: 'center', padding: '2rem' }}>
-          Failed to load shielded activity data. Please try refreshing.
+          Failed to load 0x4A shielded activity.
+          <button onClick={() => loadType4aData(TYPE_4A_AUTO_SCAN_RANGE)}
+            style={{ marginLeft: 8, fontSize: 12, padding: '4px 10px', borderRadius: 2, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer' }}>
+            Retry
+          </button>
         </div>
-      )}
+      ) : null}
+
+      {/* SRC20 value-hidden transfers — a separate mechanism from 0x4A above, loads
+         and renders independently (own state, own loading flag) so a slow 0x4A
+         scan never blocks this section, which typically resolves in a few seconds */}
+      <div style={{ background: 'var(--accent-bg)', border: '1px solid var(--accent-border)', borderRadius: 4, padding: '1rem 1.25rem', margin: '1.75rem 0 1.25rem' }}>
+        <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--accent)', marginBottom: 6 }}>🔐 SRC20 value-hidden transfers (a separate mechanism)</div>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.7 }}>
+          SUSDC (an SRC20 token) emits a custom transfer event that omits the amount — independent of the 0x4A type above: these are ordinary, unencrypted transactions (<span style={{ fontFamily: 'monospace' }}>tx.type 0x0</span>) whose privacy comes from the event, not the calldata. Detected via <span style={{ fontFamily: 'monospace' }}>eth_getLogs</span> on the SUSDC contract; counted separately from the 0x4A figures above, never summed.
+        </div>
+      </div>
+
+      {src20Loading ? (
+        <div style={{ fontSize: 13, color: 'var(--text-muted)', textAlign: 'center', padding: '2rem' }}>
+          Scanning SRC20 transfer logs via eth_getLogs...
+        </div>
+      ) : src20Stats ? (
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, marginBottom: '1.25rem' }}>
+            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, padding: '1rem 1.25rem' }}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>SRC20 Transfers Found</div>
+              <div style={{ fontSize: 26, fontWeight: 600, color: 'var(--accent)' }}>{src20Stats.count}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>last {src20Stats.blocksScanned.toLocaleString()} blocks</div>
+            </div>
+            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, padding: '1rem 1.25rem' }}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Faucet vs. Peer-to-Peer</div>
+              <div style={{ fontSize: 20, fontWeight: 600, color: 'var(--status-warning)' }}>
+                {src20Stats.faucetCount} <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 400 }}>faucet</span>
+              </div>
+              <div style={{ fontSize: 12, color: src20Stats.peerToPeerCount > 0 ? 'var(--status-good)' : 'var(--text-muted)', marginTop: 3 }}>
+                {src20Stats.peerToPeerCount} peer-to-peer{src20Stats.peerToPeerCount === 0 ? ' (none observed yet)' : ''}
+              </div>
+            </div>
+            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, padding: '1rem 1.25rem' }}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Unique Recipients</div>
+              <div style={{ fontSize: 26, fontWeight: 600, color: 'var(--series-shielded)' }}>{src20Stats.uniqueRecipients}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>distinct wallets funded</div>
+            </div>
+            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, padding: '1rem 1.25rem' }}>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Last Hour</div>
+              <div style={{ fontSize: 26, fontWeight: 600, color: 'var(--series-tx)' }}>{src20Stats.perHour}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>SRC20 transfers</div>
+            </div>
+          </div>
+
+          <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, padding: '1.25rem' }}>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '1rem' }}>
+              Recent SRC20 transfers
+            </div>
+            {src20Stats.recent.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '2rem' }}>
+                <div style={{ fontSize: 32, marginBottom: 12 }}>🔓</div>
+                <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-primary)' }}>No SRC20 transfers found in the scanned window</div>
+              </div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead>
+                  <tr style={{ color: 'var(--text-muted)', fontSize: 11, textTransform: 'uppercase' }}>
+                    <th style={{ textAlign: 'left', paddingBottom: 8, fontWeight: 500 }}>Tx Hash</th>
+                    <th style={{ textAlign: 'left', paddingBottom: 8, fontWeight: 500 }}>From</th>
+                    <th style={{ textAlign: 'left', paddingBottom: 8, fontWeight: 500 }}>To</th>
+                    <th style={{ textAlign: 'right', paddingBottom: 8, fontWeight: 500 }}>Age</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {src20Stats.recent.map((e, i) => (
+                    <tr key={e.hash + i} style={{ borderTop: '1px solid var(--border)' }}>
+                      <td style={{ padding: '8px 0', color: 'var(--series-tx)', fontFamily: 'monospace' }}>
+                        <a href={`${EXPLORER_URL}/tx/${e.hash}`} target="_blank" rel="noopener noreferrer"
+                          style={{ color: 'var(--series-tx)', textDecoration: 'none' }}>
+                          {e.hash.slice(0, 8)}...{e.hash.slice(-6)}
+                        </a>
+                      </td>
+                      <td style={{ padding: '8px 0', color: e.isFaucet ? 'var(--status-warning)' : 'var(--status-good)', fontFamily: 'monospace' }}>
+                        {e.isFaucet ? 'faucet' : `${e.from.slice(0, 8)}...`}
+                      </td>
+                      <td style={{ padding: '8px 0', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>{e.to.slice(0, 8)}...</td>
+                      <td style={{ padding: '8px 0', textAlign: 'right', color: 'var(--text-muted)' }}>{timeAgo(e.timestamp)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              </div>
+            )}
+          </div>
+
+          {src20Updated && (
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: '1rem', textAlign: 'right' }}>
+              Last updated: {src20Updated.toLocaleTimeString()} · SRC20 via eth_getLogs topic {SRC20_TRANSFER_TOPIC.slice(0, 10)}...
+            </div>
+          )}
+        </>
+      ) : src20Error ? (
+        <div style={{ fontSize: 13, color: 'var(--status-critical)', textAlign: 'center', padding: '2rem' }}>
+          Failed to load SRC20 transfer data.
+          <button onClick={loadSrc20Data}
+            style={{ marginLeft: 8, fontSize: 12, padding: '4px 10px', borderRadius: 2, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', cursor: 'pointer' }}>
+            Retry
+          </button>
+        </div>
+      ) : null}
     </div>
   )
 }
