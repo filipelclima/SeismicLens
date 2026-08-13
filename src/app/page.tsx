@@ -1904,7 +1904,7 @@ function ShieldedActivityTab() {
         <div>
           <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-primary)' }}>🔒 Shielded Activity</div>
           <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
-            Type-0x4A encrypted transactions on Seismic — calldata visible only inside the TEE
+            Two independent privacy mechanisms on Seismic, measured separately: encrypted-calldata transactions (type 0x4A) and value-hidden SRC20 transfers
           </div>
         </div>
         <button onClick={refreshAll} disabled={type4aLoading || src20Loading}
@@ -1972,9 +1972,9 @@ function ShieldedActivityTab() {
             {type4aStats.recentShielded.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '2rem' }}>
                 <div style={{ fontSize: 32, marginBottom: 12 }}>🔓</div>
-                <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 6 }}>No shielded transactions found yet</div>
+                <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 6 }}>No type-0x4A transactions in this window</div>
                 <div style={{ fontSize: 12, color: 'var(--text-muted)', maxWidth: 420, margin: '0 auto' }}>
-                  Deploy an SRC20 or another contract with shielded (<span style={{ fontFamily: 'monospace' }}>suint</span>/<span style={{ fontFamily: 'monospace' }}>sint</span>/<span style={{ fontFamily: 'monospace' }}>saddress</span>) types and send an encrypted write to see it here. Check the <a href="https://docs.seismic.systems/tutorials/src20" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)' }}>SRC20 tutorial</a>.
+                  Scanned the last {type4aStats.blocksScanned.toLocaleString()} blocks ({formatCoverage(type4aStats.coverageMinutes)} of chain) and found none — that doesn't mean 0x4A activity is absent, just that none landed in this window. Try the wide scan above for more history. Value-hidden SRC20 transfers (a separate mechanism) are reported in the section below.
                 </div>
               </div>
             ) : (
