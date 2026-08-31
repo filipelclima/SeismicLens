@@ -5,18 +5,23 @@
 import { SUSDC_FAUCET_DISPENSER, SUSDC_FAUCET_INFRA_CONTRACTS, seismicTimestampToSeconds } from './chain'
 
 const FAUCET_INFRA_SET = new Set(SUSDC_FAUCET_INFRA_CONTRACTS.map(a => a.toLowerCase()))
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
 
-export type Src20SenderCategory = 'faucet' | 'faucet-infra' | 'peer'
+export type Src20SenderCategory = 'faucet' | 'faucet-infra' | 'mint' | 'peer'
 
 // 'faucet' = SUSDC_FAUCET_DISPENSER itself. 'faucet-infra' = a different,
 // confirmed-official SeismicFaucet.sol deployment (SUSDC_FAUCET_INFRA_CONTRACTS)
-// — same operator, not organic. 'peer' = everything else. Note this does NOT
-// separately flag the zero address (mint-event artifact) — that still falls
-// under 'peer' here.
+// — same operator, not organic. 'mint' = the zero address — an ERC20/SRC20
+// convention for a mint event, not a real sender at all (no account signed
+// anything). 'peer' = everything left over, i.e. an address that is none of
+// the above — this is the only bucket that should ever be read as "real EOA
+// activity," and even then isn't proof of one (see the two unclassified
+// contracts noted in CLAUDE.md).
 export function categorizeSrc20Sender(from: string): Src20SenderCategory {
   const lower = from.toLowerCase()
   if (lower === SUSDC_FAUCET_DISPENSER) return 'faucet'
   if (FAUCET_INFRA_SET.has(lower)) return 'faucet-infra'
+  if (lower === ZERO_ADDRESS) return 'mint'
   return 'peer'
 }
 

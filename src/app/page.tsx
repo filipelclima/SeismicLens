@@ -1721,13 +1721,16 @@ interface Src20Stats {
   perHour: number
   recent: Src20LogEvent[]
   blocksScanned: number
-  // Three-way split so the metric can't be misread as organic adoption:
-  // faucetCount = the original disperser (SUSDC_FAUCET_DISPENSER); faucetInfraCount
-  // = other confirmed-official faucet contract deployments (SUSDC_FAUCET_INFRA_CONTRACTS,
-  // same operator, not organic); peerToPeerCount = everything else. If
-  // peerToPeerCount is ever > 0, that's the signal real third-party usage has started.
+  // Split so the metric can't be misread as organic adoption: faucetCount =
+  // the original disperser; faucetInfraCount = other confirmed-official
+  // faucet contract deployments (same operator, not organic); mintCount =
+  // the zero-address mint-event artifact (not a real sender at all);
+  // peerToPeerCount = whatever's left, the only bucket meant to read as real
+  // EOA activity. If peerToPeerCount is ever > 0, that's the signal real
+  // third-party usage has started.
   faucetCount: number
   faucetInfraCount: number
+  mintCount: number
   peerToPeerCount: number
   // SUSDC emits its transfer event twice per real transfer (byte-identical
   // logs, only logIndex differs) — this is how many duplicate log rows were
@@ -1788,6 +1791,7 @@ async function fetchSrc20Transfers(latest: number): Promise<Src20Stats> {
   const perHour = events.filter(e => e.timestamp > oneHourAgo).length
   const faucetCount = events.filter(e => e.senderCategory === 'faucet').length
   const faucetInfraCount = events.filter(e => e.senderCategory === 'faucet-infra').length
+  const mintCount = events.filter(e => e.senderCategory === 'mint').length
 
   return {
     count: events.length,
@@ -1798,7 +1802,8 @@ async function fetchSrc20Transfers(latest: number): Promise<Src20Stats> {
     blocksScanned: latest - fromBlock,
     faucetCount,
     faucetInfraCount,
-    peerToPeerCount: events.length - faucetCount - faucetInfraCount,
+    mintCount,
+    peerToPeerCount: events.length - faucetCount - faucetInfraCount - mintCount,
     duplicateLogsRemoved,
   }
 }
@@ -2095,6 +2100,11 @@ function ShieldedActivityTab() {
               <div style={{ fontSize: 16, fontWeight: 600, color: src20Stats.peerToPeerCount > 0 ? 'var(--status-good)' : 'var(--text-muted)', marginTop: 2 }}>
                 {src20Stats.peerToPeerCount} <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>peer-to-peer{src20Stats.peerToPeerCount === 0 ? ' (none)' : ''}</span>
               </div>
+              {src20Stats.mintCount > 0 && (
+                <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, fontStyle: 'italic' }}>
+                  {src20Stats.mintCount.toLocaleString()} mint-event transfers (zero-address sender) excluded from all three
+                </div>
+              )}
             </div>
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, padding: '1rem 1.25rem' }}>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Unique Recipients</div>
@@ -2139,10 +2149,10 @@ function ShieldedActivityTab() {
                       </td>
                       <td style={{
                         padding: '8px 0',
-                        color: e.senderCategory === 'faucet' ? 'var(--status-warning)' : e.senderCategory === 'faucet-infra' ? 'var(--text-secondary)' : 'var(--status-good)',
+                        color: e.senderCategory === 'faucet' ? 'var(--status-warning)' : e.senderCategory === 'faucet-infra' ? 'var(--text-secondary)' : e.senderCategory === 'mint' ? 'var(--text-muted)' : 'var(--status-good)',
                         fontFamily: 'monospace',
                       }}>
-                        {e.senderCategory === 'faucet' ? 'faucet' : e.senderCategory === 'faucet-infra' ? 'faucet infra' : `${e.from.slice(0, 8)}...`}
+                        {e.senderCategory === 'faucet' ? 'faucet' : e.senderCategory === 'faucet-infra' ? 'faucet infra' : e.senderCategory === 'mint' ? 'mint' : `${e.from.slice(0, 8)}...`}
                       </td>
                       <td style={{ padding: '8px 0', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>{e.to.slice(0, 8)}...</td>
                       <td style={{ padding: '8px 0', textAlign: 'right', color: 'var(--text-muted)' }}>{timeAgo(e.timestamp)}</td>
