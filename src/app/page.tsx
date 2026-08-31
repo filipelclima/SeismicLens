@@ -1721,10 +1721,13 @@ interface Src20Stats {
   perHour: number
   recent: Src20LogEvent[]
   blocksScanned: number
-  // Every SRC20 transfer observed to date comes from the same faucet address —
-  // this split exists so the metric can't be misread as organic adoption. If
-  // peerToPeerCount is ever > 0, that's the signal real usage has started.
+  // Three-way split so the metric can't be misread as organic adoption:
+  // faucetCount = the original disperser (SUSDC_FAUCET_DISPENSER); faucetInfraCount
+  // = other confirmed-official faucet contract deployments (SUSDC_FAUCET_INFRA_CONTRACTS,
+  // same operator, not organic); peerToPeerCount = everything else. If
+  // peerToPeerCount is ever > 0, that's the signal real third-party usage has started.
   faucetCount: number
+  faucetInfraCount: number
   peerToPeerCount: number
   // SUSDC emits its transfer event twice per real transfer (byte-identical
   // logs, only logIndex differs) — this is how many duplicate log rows were
@@ -1783,7 +1786,8 @@ async function fetchSrc20Transfers(latest: number): Promise<Src20Stats> {
   const now = Math.floor(Date.now() / 1000)
   const oneHourAgo = now - 3600
   const perHour = events.filter(e => e.timestamp > oneHourAgo).length
-  const faucetCount = events.filter(e => e.isFaucet).length
+  const faucetCount = events.filter(e => e.senderCategory === 'faucet').length
+  const faucetInfraCount = events.filter(e => e.senderCategory === 'faucet-infra').length
 
   return {
     count: events.length,
@@ -1793,7 +1797,8 @@ async function fetchSrc20Transfers(latest: number): Promise<Src20Stats> {
     recent: events.sort((a, b) => b.timestamp - a.timestamp).slice(0, 10),
     blocksScanned: latest - fromBlock,
     faucetCount,
-    peerToPeerCount: events.length - faucetCount,
+    faucetInfraCount,
+    peerToPeerCount: events.length - faucetCount - faucetInfraCount,
     duplicateLogsRemoved,
   }
 }
@@ -2080,12 +2085,15 @@ function ShieldedActivityTab() {
               )}
             </div>
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, padding: '1rem 1.25rem' }}>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Faucet vs. Peer-to-Peer</div>
-              <div style={{ fontSize: 20, fontWeight: 600, color: 'var(--status-warning)' }}>
-                {src20Stats.faucetCount} <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 400 }}>faucet</span>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Faucet vs. Infra vs. Peer</div>
+              <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--status-warning)' }}>
+                {src20Stats.faucetCount} <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>faucet</span>
               </div>
-              <div style={{ fontSize: 12, color: src20Stats.peerToPeerCount > 0 ? 'var(--status-good)' : 'var(--text-muted)', marginTop: 3 }}>
-                {src20Stats.peerToPeerCount} peer-to-peer{src20Stats.peerToPeerCount === 0 ? ' (none observed yet)' : ''}
+              <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-secondary)', marginTop: 2 }}>
+                {src20Stats.faucetInfraCount} <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>faucet infra</span>
+              </div>
+              <div style={{ fontSize: 16, fontWeight: 600, color: src20Stats.peerToPeerCount > 0 ? 'var(--status-good)' : 'var(--text-muted)', marginTop: 2 }}>
+                {src20Stats.peerToPeerCount} <span style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>peer-to-peer{src20Stats.peerToPeerCount === 0 ? ' (none)' : ''}</span>
               </div>
             </div>
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, padding: '1rem 1.25rem' }}>
@@ -2129,8 +2137,12 @@ function ShieldedActivityTab() {
                           {e.hash.slice(0, 8)}...{e.hash.slice(-6)}
                         </a>
                       </td>
-                      <td style={{ padding: '8px 0', color: e.isFaucet ? 'var(--status-warning)' : 'var(--status-good)', fontFamily: 'monospace' }}>
-                        {e.isFaucet ? 'faucet' : `${e.from.slice(0, 8)}...`}
+                      <td style={{
+                        padding: '8px 0',
+                        color: e.senderCategory === 'faucet' ? 'var(--status-warning)' : e.senderCategory === 'faucet-infra' ? 'var(--text-secondary)' : 'var(--status-good)',
+                        fontFamily: 'monospace',
+                      }}>
+                        {e.senderCategory === 'faucet' ? 'faucet' : e.senderCategory === 'faucet-infra' ? 'faucet infra' : `${e.from.slice(0, 8)}...`}
                       </td>
                       <td style={{ padding: '8px 0', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>{e.to.slice(0, 8)}...</td>
                       <td style={{ padding: '8px 0', textAlign: 'right', color: 'var(--text-muted)' }}>{timeAgo(e.timestamp)}</td>

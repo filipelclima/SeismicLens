@@ -2,7 +2,23 @@
 // client-side Shielded Activity tab (src/app/page.tsx) and the server-side
 // collector (src/app/api/collect/route.ts). Neither should reimplement this;
 // see CLAUDE.md's SRC20 double-emission note for why.
-import { SUSDC_FAUCET_DISPENSER, seismicTimestampToSeconds } from './chain'
+import { SUSDC_FAUCET_DISPENSER, SUSDC_FAUCET_INFRA_CONTRACTS, seismicTimestampToSeconds } from './chain'
+
+const FAUCET_INFRA_SET = new Set(SUSDC_FAUCET_INFRA_CONTRACTS.map(a => a.toLowerCase()))
+
+export type Src20SenderCategory = 'faucet' | 'faucet-infra' | 'peer'
+
+// 'faucet' = SUSDC_FAUCET_DISPENSER itself. 'faucet-infra' = a different,
+// confirmed-official SeismicFaucet.sol deployment (SUSDC_FAUCET_INFRA_CONTRACTS)
+// — same operator, not organic. 'peer' = everything else. Note this does NOT
+// separately flag the zero address (mint-event artifact) — that still falls
+// under 'peer' here.
+export function categorizeSrc20Sender(from: string): Src20SenderCategory {
+  const lower = from.toLowerCase()
+  if (lower === SUSDC_FAUCET_DISPENSER) return 'faucet'
+  if (FAUCET_INFRA_SET.has(lower)) return 'faucet-infra'
+  return 'peer'
+}
 
 export interface Src20LogEvent {
   hash: string
@@ -10,7 +26,7 @@ export interface Src20LogEvent {
   from: string
   to: string
   timestamp: number
-  isFaucet: boolean
+  senderCategory: Src20SenderCategory
 }
 
 // SUSDC emits its transfer event TWICE per real transfer — confirmed across
@@ -31,6 +47,6 @@ export function parseSrc20Log(log: any): Src20LogEvent {
     from,
     to,
     timestamp: seismicTimestampToSeconds(log.blockTimestamp),
-    isFaucet: from.toLowerCase() === SUSDC_FAUCET_DISPENSER,
+    senderCategory: categorizeSrc20Sender(from),
   }
 }
