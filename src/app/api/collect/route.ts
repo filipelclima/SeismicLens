@@ -295,7 +295,7 @@ export async function GET(req: Request) {
 
     if (src20Result.truncated) {
       await sendDiscordAlert(
-        `⚠️ **SeismicLens — SRC20 scan gap**\nThe delta since the last snapshot's block exceeded ${(SRC20_COLLECT_MAX_CHUNKS * GET_LOGS_MAX_RANGE).toLocaleString()} blocks (likely a collection gap) — only the most recent portion was scanned for SRC20 transfers this run. \`src20_transfer_count\` for this snapshot undercounts; some history in the gap was skipped, not backfilled.`
+        `⚠️ **SeismicLens — SRC20 scan gap**\nThe delta since the last snapshot's block exceeded ${(SRC20_COLLECT_MAX_CHUNKS * GET_LOGS_MAX_RANGE).toLocaleString('en-US')} blocks (likely a collection gap) — only the most recent portion was scanned for SRC20 transfers this run. \`src20_transfer_count\` for this snapshot undercounts; some history in the gap was skipped, not backfilled.`
       )
     }
 

@@ -194,12 +194,12 @@ function DashboardTab() {
   }, [])
 
   const blockTimeData = data.blocks.slice(1).map((b, i) => ({
-    block: `#${b.number.toLocaleString()}`,
+    block: `#${b.number.toLocaleString('en-US')}`,
     time: data.blocks[i + 1].timestamp - data.blocks[i].timestamp,
   }))
 
   const txData = data.blocks.map(b => ({
-    block: `#${b.number.toLocaleString()}`,
+    block: `#${b.number.toLocaleString('en-US')}`,
     txs: b.txCount,
   }))
 
@@ -219,7 +219,7 @@ function DashboardTab() {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, marginBottom: '1.5rem' }}>
-        <MetricCard label="Latest block" value={data.latestBlock > 0 ? data.latestBlock.toLocaleString() : '—'} unit="block number" color="var(--text-primary)" />
+        <MetricCard label="Latest block" value={data.latestBlock > 0 ? data.latestBlock.toLocaleString('en-US') : '—'} unit="block number" color="var(--text-primary)" />
         <MetricCard label="Avg block time" value={data.avgBlockTime > 0 ? `${data.avgBlockTime}s` : '—'} unit="last 10 blocks" color="var(--series-tx)" />
         <MetricCard label="Gas price" value={data.gasPrice !== '0' ? `${data.gasPrice}` : '—'} unit={`gwei · paid in ${NATIVE_CURRENCY.symbol}`} color="var(--status-warning)" />
         <MetricCard label="RPC latency" value={data.rpcLatency > 0 ? `${data.rpcLatency}ms` : '—'} unit="response time" color="var(--series-shielded)" />
@@ -329,7 +329,7 @@ function DashboardTab() {
             <tbody>
               {[...data.blocks].reverse().map(b => (
                 <tr key={b.number} style={{ borderTop: '1px solid var(--border)' }}>
-                  <td style={{ padding: '9px 0', color: 'var(--accent)', fontWeight: 500 }}>#{b.number.toLocaleString()}</td>
+                  <td style={{ padding: '9px 0', color: 'var(--accent)', fontWeight: 500 }}>#{b.number.toLocaleString('en-US')}</td>
                   <td style={{ padding: '9px 0', color: 'var(--text-muted)' }}>{timeAgo(b.timestamp)}</td>
                   <td style={{ padding: '9px 0', textAlign: 'right' }}>
                     <span style={{ background: 'var(--bg-divider)', color: 'var(--text-secondary)', fontSize: 11, padding: '2px 8px', borderRadius: 2 }}>{b.txCount} txs</span>
@@ -688,7 +688,7 @@ function TxTypeBreakdown() {
         Transaction Type Breakdown
       </div>
       <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: '1rem' }}>
-        Last {blocksScanned} blocks · {total.toLocaleString()} total transactions
+        Last {blocksScanned} blocks · {total.toLocaleString('en-US')} total transactions
       </div>
 
       {loading ? (
@@ -716,7 +716,7 @@ function TxTypeBreakdown() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 3 }}>
                     <span style={{ fontSize: 13, color: 'var(--text-primary)' }}>{t.icon} {t.label}</span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t.count.toLocaleString()}</span>
+                      <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t.count.toLocaleString('en-US')}</span>
                       <span style={{ fontSize: 12, fontWeight: 600, color: t.color, minWidth: 40, textAlign: 'right' }}>
                         {total > 0 ? ((t.count / total) * 100).toFixed(1) : 0}%
                       </span>
@@ -1000,9 +1000,9 @@ function NetworkStatusTab() {
                 <div style={{ fontSize: 28, fontWeight: 700, color: successRateColor(txStats.successRate) }}>{txStats.successRate}%</div>
                 <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>of sampled txs</div>
               </div>
-              <MetricCard label="Total Txs Scanned" value={txStats.total.toLocaleString()} unit="transactions" color="var(--series-tx)" />
-              <MetricCard label="Successful" value={txStats.success.toLocaleString()} unit="transactions" color="var(--status-good)" />
-              <MetricCard label="Failed" value={txStats.failed.toLocaleString()} unit="transactions" color={txStats.failed > 0 ? 'var(--status-critical)' : 'var(--text-muted)'} />
+              <MetricCard label="Total Txs Scanned" value={txStats.total.toLocaleString('en-US')} unit="transactions" color="var(--series-tx)" />
+              <MetricCard label="Successful" value={txStats.success.toLocaleString('en-US')} unit="transactions" color="var(--status-good)" />
+              <MetricCard label="Failed" value={txStats.failed.toLocaleString('en-US')} unit="transactions" color={txStats.failed > 0 ? 'var(--status-critical)' : 'var(--text-muted)'} />
             </div>
 
             <div style={{ marginTop: 8 }}>
@@ -1051,7 +1051,7 @@ function NetworkStatusTab() {
                   ) : (
                     <>
                       <div style={{ fontSize: 18, fontWeight: 600, color: latencyColor(ep.latency!) }}>{ep.latency}ms</div>
-                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Block #{ep.blockNumber?.toLocaleString()}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Block #{ep.blockNumber?.toLocaleString('en-US')}</div>
                     </>
                   )}
                 </div>
@@ -1144,7 +1144,7 @@ function GasEstimator() {
                   <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>{op.description}</div>
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'monospace', marginLeft: 8, flexShrink: 0 }}>
-                  {op.gas.toLocaleString()} gas
+                  {op.gas.toLocaleString('en-US')} gas
                 </div>
               </div>
             ))}
@@ -1163,7 +1163,7 @@ function GasEstimator() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ color: 'var(--text-muted)' }}>Gas limit</span>
-                <span style={{ color: 'var(--text-primary)', fontFamily: 'monospace' }}>{gasLimit.toLocaleString()}</span>
+                <span style={{ color: 'var(--text-primary)', fontFamily: 'monospace' }}>{gasLimit.toLocaleString('en-US')}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ color: 'var(--text-muted)' }}>Gas price</span>
@@ -1171,7 +1171,7 @@ function GasEstimator() {
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ color: 'var(--text-muted)' }}>Total gas cost</span>
-                <span style={{ color: 'var(--text-primary)', fontFamily: 'monospace' }}>{costGwei.toLocaleString()} gwei</span>
+                <span style={{ color: 'var(--text-primary)', fontFamily: 'monospace' }}>{costGwei.toLocaleString('en-US')} gwei</span>
               </div>
               <div style={{ borderTop: '1px solid var(--border)', paddingTop: 6, display: 'flex', justifyContent: 'space-between' }}>
                 <span style={{ color: 'var(--text-muted)' }}>Cost in {NATIVE_CURRENCY.symbol}</span>
@@ -1736,6 +1736,14 @@ interface Src20Stats {
   // logs, only logIndex differs) — this is how many duplicate log rows were
   // collapsed to get `count` above. See CLAUDE.md's SRC20 double-emission note.
   duplicateLogsRemoved: number
+  // Raw eth_getLogs row count before dedup (N in "N raw logs → M transfers";
+  // `count` above is M). Always duplicateLogsRemoved + count.
+  rawLogCount: number
+  // Whether the double-emission bug is still producing duplicate raw logs for
+  // the most recent transactions specifically (as opposed to `duplicateLogsRemoved`,
+  // which reflects the whole scan window and stays > 0 forever once any old
+  // duplicate exists). null when there isn't at least one recent transfer to check.
+  recentDuplicatesStillLive: boolean | null
 }
 
 interface Type4aStats {
@@ -1793,18 +1801,36 @@ async function fetchSrc20Transfers(latest: number): Promise<Src20Stats> {
   const faucetInfraCount = events.filter(e => e.senderCategory === 'faucet-infra').length
   const mintCount = events.filter(e => e.senderCategory === 'mint').length
 
+  const eventsByRecency = events.sort((a, b) => b.timestamp - a.timestamp)
+
+  // Live check: does the double-emission bug still fire for transfers landing
+  // right now, or did the merged fix actually make it to the deployed
+  // contract? Compares each of the last 20 distinct tx hashes against its raw
+  // (pre-dedup) log count — a fixed contract emits exactly 1 log/tx, so any
+  // hash with >1 means the bug is still live on-chain.
+  const rawLogCountByHash = new Map<string, number>()
+  for (const log of logs) {
+    rawLogCountByHash.set(log.transactionHash, (rawLogCountByHash.get(log.transactionHash) ?? 0) + 1)
+  }
+  const recentHashes = eventsByRecency.slice(0, 20).map(e => e.hash)
+  const recentDuplicatesStillLive = recentHashes.length === 0
+    ? null
+    : recentHashes.some(hash => (rawLogCountByHash.get(hash) ?? 0) > 1)
+
   return {
     count: events.length,
     uniqueSenders: senders.size,
     uniqueRecipients: recipients.size,
     perHour,
-    recent: events.sort((a, b) => b.timestamp - a.timestamp).slice(0, 10),
+    recent: eventsByRecency.slice(0, 10),
     blocksScanned: latest - fromBlock,
     faucetCount,
     faucetInfraCount,
     mintCount,
     peerToPeerCount: events.length - faucetCount - faucetInfraCount - mintCount,
     duplicateLogsRemoved,
+    rawLogCount: logs.length,
+    recentDuplicatesStillLive,
   }
 }
 
@@ -1962,7 +1988,7 @@ function ShieldedActivityTab() {
       {type4aLoading ? (
         <div style={{ fontSize: 13, color: 'var(--text-muted)', textAlign: 'center', padding: '2rem' }}>
           <div style={{ marginBottom: 10 }}>
-            Scanning blocks for 0x4A activity — {type4aProgress.toLocaleString()} / {type4aRangeInFlight.toLocaleString()}
+            Scanning blocks for 0x4A activity — {type4aProgress.toLocaleString('en-US')} / {type4aRangeInFlight.toLocaleString('en-US')}
           </div>
           <div style={{ maxWidth: 320, margin: '0 auto', height: 4, background: 'var(--border)', borderRadius: 2, overflow: 'hidden' }}>
             <div style={{ width: `${type4aRangeInFlight > 0 ? (type4aProgress / type4aRangeInFlight) * 100 : 0}%`, height: '100%', background: 'var(--accent)', transition: 'width 0.2s' }} />
@@ -1974,12 +2000,12 @@ function ShieldedActivityTab() {
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, padding: '1rem 1.25rem' }}>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Shielded Txs Found</div>
               <div style={{ fontSize: 26, fontWeight: 600, color: 'var(--accent)' }}>{type4aStats.totalShielded}</div>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>{formatCoverage(type4aStats.coverageMinutes)} of chain ({type4aStats.blocksScanned.toLocaleString()} blocks)</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>{formatCoverage(type4aStats.coverageMinutes)} of chain ({type4aStats.blocksScanned.toLocaleString('en-US')} blocks)</div>
             </div>
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, padding: '1rem 1.25rem' }}>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Share of All Txs</div>
               <div style={{ fontSize: 26, fontWeight: 600, color: 'var(--status-warning)' }}>{shieldedPct}%</div>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>of {type4aStats.totalTx.toLocaleString()} scanned</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>of {type4aStats.totalTx.toLocaleString('en-US')} scanned</div>
             </div>
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, padding: '1rem 1.25rem' }}>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Unique Targets</div>
@@ -1996,10 +2022,10 @@ function ShieldedActivityTab() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: '1.25rem' }}>
             <button onClick={loadType4aWideScan} disabled={type4aLoading}
               style={{ fontSize: 12, padding: '6px 12px', borderRadius: 2, border: '1px solid var(--accent-border)', background: 'var(--accent-bg)', color: 'var(--accent)', cursor: type4aLoading ? 'default' : 'pointer' }}>
-              🔍 Wide scan ({TYPE_4A_WIDE_SCAN_RANGE.toLocaleString()} blocks)
+              🔍 Wide scan ({TYPE_4A_WIDE_SCAN_RANGE.toLocaleString('en-US')} blocks)
             </button>
             <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-              ~{TYPE_4A_WIDE_SCAN_RANGE.toLocaleString()} RPC calls, can take 1–2 minutes — covers more chain history than the automatic scan above
+              ~{TYPE_4A_WIDE_SCAN_RANGE.toLocaleString('en-US')} RPC calls, can take 1–2 minutes — covers more chain history than the automatic scan above
             </span>
           </div>
 
@@ -2012,7 +2038,7 @@ function ShieldedActivityTab() {
                 <div style={{ fontSize: 32, marginBottom: 12 }}>🔓</div>
                 <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 6 }}>No type-0x4A transactions in this window</div>
                 <div style={{ fontSize: 12, color: 'var(--text-muted)', maxWidth: 420, margin: '0 auto' }}>
-                  Scanned the last {type4aStats.blocksScanned.toLocaleString()} blocks ({formatCoverage(type4aStats.coverageMinutes)} of chain) and found none — that doesn't mean 0x4A activity is absent, just that none landed in this window. Try the wide scan above for more history. Value-hidden SRC20 transfers (a separate mechanism) are reported in the section below.
+                  Scanned the last {type4aStats.blocksScanned.toLocaleString('en-US')} blocks ({formatCoverage(type4aStats.coverageMinutes)} of chain) and found none — that doesn't mean 0x4A activity is absent, just that none landed in this window. Try the wide scan above for more history. Value-hidden SRC20 transfers (a separate mechanism) are reported in the section below.
                 </div>
               </div>
             ) : (
@@ -2035,7 +2061,7 @@ function ShieldedActivityTab() {
                           {m.hash.slice(0, 8)}...{m.hash.slice(-6)}
                         </a>
                       </td>
-                      <td style={{ padding: '8px 0', color: 'var(--accent)' }}>#{m.block.toLocaleString()}</td>
+                      <td style={{ padding: '8px 0', color: 'var(--accent)' }}>#{m.block.toLocaleString('en-US')}</td>
                       <td style={{ padding: '8px 0', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>{m.target.slice(0, 10)}...</td>
                       <td style={{ padding: '8px 0', textAlign: 'right', color: 'var(--text-muted)' }}>{timeAgo(m.timestamp)}</td>
                     </tr>
@@ -2081,11 +2107,21 @@ function ShieldedActivityTab() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, marginBottom: '1.25rem' }}>
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, padding: '1rem 1.25rem' }}>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>SRC20 Transfers Found</div>
-              <div style={{ fontSize: 26, fontWeight: 600, color: 'var(--accent)' }}>{src20Stats.count}</div>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>last {src20Stats.blocksScanned.toLocaleString()} blocks</div>
+              <div style={{ fontSize: 26, fontWeight: 600, color: 'var(--accent)' }}>{src20Stats.count.toLocaleString('en-US')}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>last {src20Stats.blocksScanned.toLocaleString('en-US')} blocks</div>
               {src20Stats.duplicateLogsRemoved > 0 && (
                 <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, fontStyle: 'italic' }}>
-                  SUSDC emits 2 identical logs per transfer — {src20Stats.duplicateLogsRemoved.toLocaleString()} duplicates deduped by tx hash
+                  {src20Stats.rawLogCount.toLocaleString('en-US')} raw logs → {src20Stats.count.toLocaleString('en-US')} transfers (SUSDC emits 2 identical logs per transfer)
+                </div>
+              )}
+              {src20Stats.recentDuplicatesStillLive !== null && (
+                <div style={{
+                  fontSize: 10,
+                  color: src20Stats.recentDuplicatesStillLive ? 'var(--status-warning)' : 'var(--status-good)',
+                  marginTop: 4,
+                  fontStyle: 'italic',
+                }}>
+                  {src20Stats.recentDuplicatesStillLive ? 'duplicate-log bug: still live on-chain' : 'no duplicates in recent transfers'}
                 </div>
               )}
             </div>
@@ -2102,14 +2138,14 @@ function ShieldedActivityTab() {
               </div>
               {src20Stats.mintCount > 0 && (
                 <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, fontStyle: 'italic' }}>
-                  {src20Stats.mintCount.toLocaleString()} mint-event transfers (zero-address sender) excluded from all three
+                  {src20Stats.mintCount.toLocaleString('en-US')} mint-event transfers (zero-address sender) excluded from all three
                 </div>
               )}
             </div>
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, padding: '1rem 1.25rem' }}>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Unique Recipients</div>
               <div style={{ fontSize: 26, fontWeight: 600, color: 'var(--series-shielded)' }}>{src20Stats.uniqueRecipients}</div>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>distinct wallets funded</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 3 }}>distinct recipients (all sources)</div>
             </div>
             <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 4, padding: '1rem 1.25rem' }}>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Last Hour</div>
